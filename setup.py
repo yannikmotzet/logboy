@@ -15,7 +15,7 @@ setup(
         ('share/' + package_name + '/config', glob.glob('config/*')),  # Use glob for config
         ('share/' + package_name + '/launch', glob.glob('launch/*')),  # Added launch folder
     ],
-    install_requires=['setuptools', 'tkinter', 'pyyaml'],  # Added pyyaml
+    install_requires=['setuptools', 'pyyaml'],  # Added pyyaml
     zip_safe=True,
     maintainer='Yannik Motzet',
     maintainer_email='yannik.motzet@outlook.com',
@@ -25,6 +25,7 @@ setup(
         'console_scripts': [
             'logboy_node = logboy.logboy_node:main',
             'logboy_gui_node = logboy.logboy_gui_node:main',
+            'logboy = logboy.logboy_cli:main',
         ],
     },
 )

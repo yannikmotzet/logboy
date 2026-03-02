@@ -12,14 +12,14 @@ import time
 # TODO add buffers to get topic hz for monitoring
 # TODO what happens if a topic joins later and record all topics is set?
 
-class BagRecorderNode(Node):
+class LogboyNode(Node):
     
     def __init__(self, storage_path=None, robot_name=None, topics=None, ros_storage_plugin='mcap'):
         """
         Initialize the BagRecorderNode.
         can be configured with parameters or through the configure_recorder() method.
         """
-        super().__init__('bag_recorder_node')
+        super().__init__('logboy_node')
 
         self.storage_path = storage_path
         self.robot_name = robot_name
@@ -100,7 +100,7 @@ class BagRecorderNode(Node):
         
     def configure_recorder(self, config):
         # validate config for required keys and value types
-        mandatory_keys = ['storage_path', 'robot_name', 'topic']
+        mandatory_keys = ['storage_path', 'robot_name', 'topics']
         for key in mandatory_keys:
             if key not in config or not config[key]:
                 raise ValueError(f"Mandatory key '{key}' is missing or empty in the configuration.")
@@ -169,22 +169,3 @@ class BagRecorderNode(Node):
             return
         self.get_logger().info("resuming recording...")
         self.__create_subscriptions()
-
-
-def main(args=None):
-    rclpy.init(args=args)
-    node = BagRecorderNode()
-    executor = MultiThreadedExecutor(num_threads=None)
-    try:
-        executor.add_node(node)
-        executor.spin()
-    except (KeyboardInterrupt, ExternalShutdownException):
-        pass
-    finally:
-        executor.shutdown()
-        if rclpy.ok():
-            rclpy.shutdown()
-
-
-if __name__ == '__main__':
-    main()
