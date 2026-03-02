@@ -95,8 +95,14 @@ class LogboyNode(Node):
         except (ImportError, AttributeError) as e:
             raise RuntimeError(f"Failed to import message type '{topic_type}': {e}")
         
-    def is_configured(self):
-        return self.storage_path is not None and self.robot_name is not None and self.topics is not None
+    def pre_rec_check(self):
+        if self.storage_path is None or self.robot_name is None or self.topics is None:
+            return False
+    
+        if self.storage_path.startswith("~"):
+            self.storage_path = os.path.expanduser(self.storage_path)
+
+        return True
         
     def configure_recorder(self, config):
         # validate config for required keys and value types
@@ -130,7 +136,7 @@ class LogboyNode(Node):
         self.topics = self.discover_topics()
         
     def start_recording(self):
-        if not self.is_configured():
+        if not self.pre_rec_check():
             raise ValueError("Recorder is not properly configured. Please provide storage_path, robot_name and topics.")
 
         try:

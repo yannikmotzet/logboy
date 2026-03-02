@@ -24,7 +24,7 @@ setup(
     entry_points={
         'console_scripts': [
             'logboy_node = logboy.logboy_node:main',
-            'logboy_gui_node = logboy.logboy_gui_node:main',
+            'logboy_gui = logboy.logboy_gui:main',
             'logboy = logboy.logboy_cli:main',
         ],
     },

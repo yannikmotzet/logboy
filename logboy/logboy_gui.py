@@ -1,171 +1,159 @@
-import tkinter as tk
+from nicegui import ui
 import os
+import yaml
+from logboy.logboy_controller import LogboyController
 
-class BagRecorderGUI:
-    def __init__(self, root, controller):
-        """Initialize the RecorderApp."""
-        self.root = root
-        self.root.title("logboy")
+
+class LogboyGUI:
+    def __init__(self, controller):
         self.controller = controller
+        self.is_recording = False
+        self.is_paused = False
+        self.config = None
 
-        # Get the first path from AMENT_PREFIX_PATH or use a default fallback
+        # Resolve assets directory
         ament_prefix_path = os.getenv('AMENT_PREFIX_PATH', '')
         paths = ament_prefix_path.split(os.pathsep)
-
         if not paths or not paths[0]:
             raise ValueError("AMENT_PREFIX_PATH is not set or invalid.")
+        self.assets_dir = os.path.join(paths[0], 'share', 'logboy', 'assets')
 
-        base_path = paths[0]
+        self._build_ui()
 
-        # Construct the full path to the assets directory
-        package_share_directory = os.path.join(base_path, 'share', 'logboy', 'assets')
+    def _build_ui(self):
+        with ui.row().classes('items-center justify-center w-full mt-4'):
+            self.record_btn = ui.image(self._asset('rec-button.png')).classes('w-24 h-24 cursor-pointer')
+            self.record_btn.on('click', self.start_recording)
 
-        self.record_img = self.__load_image(os.path.join(package_share_directory, "rec-button.png"))
-        self.record_img_inactive = self.__load_image(os.path.join(package_share_directory, "rec-button_inactive_2.png"))
-        self.pause_img = self.__load_image(os.path.join(package_share_directory, "pause.png"))
-        self.pause_img_inactive = self.__load_image(os.path.join(package_share_directory, "circular.png"))
-        self.stop_img = self.__load_image(os.path.join(package_share_directory, "stop-button.png"))
+            self.pause_btn = ui.image(self._asset('pause.png')).classes('w-24 h-24 cursor-pointer opacity-30')
+            self.pause_btn.on('click', self.pause_recording)
 
-        # create button for record icon
-        button_frame = tk.Frame(root)
-        button_frame.pack(pady=(10, 5), padx=5)
+            self.stop_btn = ui.image(self._asset('stop-button.png')).classes('w-24 h-24 cursor-pointer opacity-30')
+            self.stop_btn.on('click', self.stop_recording)
 
-        self.record_button = tk.Button(
-            button_frame,
-            image=self.record_img,
-            command=self.start_recording,
-            width=100,
-            height=100,
-        )
-        self.record_button.grid(row=0, column=0, padx=5, pady=0)
+        self.status_label = ui.label('Status: Ready').classes('text-lg text-center w-full mt-2')
 
-        # create button for pause icon
-        self.pause_button = tk.Button(
-            button_frame,
-            image=self.pause_img,
-            command=self.pause_recording,
-            state=tk.DISABLED,
-            width=100,
-            height=100,
-        )
-        self.pause_button.grid(row=0, column=1, padx=5, pady=0)
+        with ui.row().classes('items-center justify-center w-full mt-4 px-4 gap-4'):
+            self.yaml_label = ui.label('No config loaded').classes('text-sm text-gray-500 italic')
+            ui.upload(
+                label='Load YAML config',
+                auto_upload=True,
+                on_upload=self._on_yaml_upload,
+            ).classes('max-w-xs').props('flat bordered accept=".yaml,.yml"')
 
-        # create button for stop icon
-        self.stop_button = tk.Button(
-            button_frame,
-            image=self.stop_img,
-            command=self.stop_recording,
-            state=tk.DISABLED,
-            width=100,
-            height=100,
-        )
-        self.stop_button.grid(row=0, column=2, padx=5, pady=0)
+        # Timer for blinking effect
+        self._blink_state = False
+        self.blink_timer = ui.timer(1.0, self._blink_record, active=False)
+        self.blink_pause_timer = ui.timer(0.25, self._blink_pause, active=False)
 
-        self.status_label = tk.Label(root, text="Status: Ready", font=("Arial", 12))
-        self.status_label.pack(pady=(0, 5))
+    # --- Asset helper ---
 
-        self.root.resizable(False, False)
+    def _asset(self, filename):
+        path = os.path.join(self.assets_dir, filename)
+        if os.path.exists(path):
+            return path
+        return 'https://placehold.co/100x100/gray/gray'  # fallback placeholder
 
-        self.recording = False
-        self.paused = False
-        self.record_process = None
+    # --- Config ---
 
-        # bind the close event
-        self.root.protocol("WM_DELETE_WINDOW", self.on_closing)
+    async def _on_yaml_upload(self, e):
+        try:
+            raw = await e.file.read()
+            self.config = yaml.safe_load(raw)
+            self.yaml_label.set_text(f'Loaded: {e.file.name}')
+            self.yaml_label.classes(remove='text-gray-500 text-red-500', add='text-green-600')
+        except Exception as ex:
+            self.config = None
+            self.yaml_label.set_text(f'Error: {ex}')
+            self.yaml_label.classes(remove='text-gray-500 text-green-600', add='text-red-500')
 
-    
-    def __load_image(self, file_path, fallback_color="gray", size=(100, 100)):
-        """Load an image or create a dummy image if the file doesn't exist."""
-        if os.path.exists(file_path):
-            return tk.PhotoImage(file=file_path)
+    # --- Blink helpers ---
+
+    def _blink_record(self):
+        self._blink_state = not self._blink_state
+        src = self._asset('rec-button_inactive_2.png') if self._blink_state else self._asset('rec-button.png')
+        self.record_btn.set_source(src)
+
+    def _blink_pause(self):
+        self._blink_state = not self._blink_state
+        src = self._asset('circular.png') if self._blink_state else self._asset('pause.png')
+        self.pause_btn.set_source(src)
+
+    # --- Button state helpers ---
+
+    def _set_enabled(self, element, enabled: bool):
+        if enabled:
+            element.classes(remove='opacity-30 pointer-events-none')
         else:
-            print(f"Image not found: {file_path}. Using dummy image.")
-            dummy_image = tk.PhotoImage(width=size[0], height=size[1])
-            dummy_image.put(fallback_color, to=(0, 0, size[0], size[1]))
-            return dummy_image
+            element.classes(add='opacity-30 pointer-events-none')
 
-
-    def __blink_record_button(self):
-        """Blink the record button."""
-        if self.recording:
-            current_image = self.record_button.cget("image")
-            next_image = (
-                str(self.record_img_inactive)
-                if current_image == str(self.record_img)
-                else str(self.record_img)
-            )
-            self.record_button.config(image=next_image)
-            self.root.after(1000, self.__blink_record_button)  # Change image every 1000ms
-
-
-    def __blink_pause_button(self):
-        """Blink the pause button."""
-        if not self.recording and self.paused:
-            current_image = self.pause_button.cget("image")
-            next_image = (
-                str(self.pause_img_inactive)
-                if current_image == str(self.pause_img)
-                else str(self.pause_img)
-            )
-            self.pause_button.config(image=next_image)
-            self.root.after(250, self.__blink_pause_button)  # Change image every 250ms
-
-    
-    def configure_recorder(self):
-        return {"storage_path": "/tmp", "robot_name": "logboy", "ros_storage_plugin": "mcap"}
+    # --- Actions ---
 
     def start_recording(self):
-        self.controller.configure_recorder(self.configure_recorder())
+        if self.config is None:
+            ui.notify('Please load a YAML config file first.', type='warning')
+            return
+
+        self.controller.configure_recorder(self.config)
         self.controller.start_recording()
 
-        self.status_label.config(text="Status: Recording")
-        self.record_button.config(state=tk.DISABLED)
-        self.stop_button.config(state=tk.NORMAL)
-        self.pause_button.config(state=tk.NORMAL)
-        self.recording = True
-        self.paused = False
-        self.__blink_record_button()
+        self.is_recording = True
+        self.is_paused = False
+        self.status_label.set_text('Status: Recording')
 
+        self._set_enabled(self.record_btn, False)
+        self._set_enabled(self.stop_btn, True)
+        self._set_enabled(self.pause_btn, True)
+
+        self.blink_timer.activate()
 
     def stop_recording(self):
         self.controller.stop_recording()
 
-        self.status_label.config(text="Status: Stopped")
-        self.pause_button.config(image=self.pause_img)
-        self.record_button.config(state=tk.NORMAL)
-        self.stop_button.config(state=tk.DISABLED)
-        self.pause_button.config(state=tk.DISABLED)
-        self.recording = False
-        self.paused = False
-        self.record_button.config(image=self.record_img)
-        self.pause_button.config(image=self.pause_img)
+        self.is_recording = False
+        self.is_paused = False
+        self.status_label.set_text('Status: Stopped')
 
+        self.blink_timer.deactivate()
+        self.blink_pause_timer.deactivate()
+
+        self.record_btn.set_source(self._asset('rec-button.png'))
+        self.pause_btn.set_source(self._asset('pause.png'))
+
+        self._set_enabled(self.record_btn, True)
+        self._set_enabled(self.stop_btn, False)
+        self._set_enabled(self.pause_btn, False)
 
     def pause_recording(self):
-        """Pause or resume recording."""
-        if not self.paused:
+        if not self.is_paused:
             self.controller.pause_recording()
 
-            self.status_label.config(text="Status: Paused")
-            self.recording = False
-            self.paused = True
-            self.__blink_pause_button()
+            self.is_recording = False
+            self.is_paused = True
+            self.status_label.set_text('Status: Paused')
+
+            self.blink_timer.deactivate()
+            self.record_btn.set_source(self._asset('rec-button.png'))
+
+            self.blink_pause_timer.activate()
         else:
             self.controller.resume_recording()
 
-            self.status_label.config(text="Status: Recording Resumed")
-            self.recording = True
-            self.paused = False
-            self.__blink_record_button()
+            self.is_recording = True
+            self.is_paused = False
+            self.status_label.set_text('Status: Recording Resumed')
 
-        self.pause_button.config(
-            image=self.pause_img_inactive if self.paused else self.pause_img
-        )
+            self.blink_pause_timer.deactivate()
+            self.pause_btn.set_source(self._asset('pause.png'))
+
+            self.blink_timer.activate()
 
 
-    def on_closing(self):
-        """Handle the window close event."""
-        if self.record_process:
-            self.record_process.terminate()
-            self.record_process.wait()
-        self.root.destroy()
+def main():
+    controller = LogboyController()
+
+    @ui.page('/')
+    def index():
+        LogboyGUI(controller)
+
+    ui.run(title='logboy', reload=False)
