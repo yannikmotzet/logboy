@@ -39,3 +39,6 @@ class LogboyController:
 
     def get_topics(self):
         return self.node.get_rec_topics()
+    
+    def get_stats(self):
+        return self.node.get_stats()
