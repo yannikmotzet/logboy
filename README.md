@@ -26,6 +26,15 @@ Logboy is a powerful tool designed to record ROS 2 `.mcap` files. It seamlessly 
 - **Configuration via YAML**: Flexible `.yaml` file-based setup for storage locations, topic selection, and metadata (e.g., descriptions).
 - **Integration with Bagman**: Simplified upload and management of recordings.
 
+<p align="center">
+    <img src="assets/screenshot_cli.png" alt="Logboy GUI Screenshot" width="600">
+</p>
+
+<p align="center">
+    <img src="assets/screenshot_gui.png" alt="Logboy GUI Screenshot" width="600">
+</p>
+
+
 ## Prerequisites
 TBD
 
