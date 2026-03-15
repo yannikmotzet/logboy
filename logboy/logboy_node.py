@@ -84,15 +84,23 @@ class LogboyNode(Node):
         self.get_logger().info(f"Recording to: {bag_path}")
         self.__create_writer(bag_path)
         self._recording = True
+        for s in self._topic_stats.values():
+            s.reset_counts()
+            s.set_recording(True)
 
     def stop_recording(self):
         self.get_logger().info("Stopping recording…")
         self._recording = False
+        for s in self._topic_stats.values():
+            s.set_recording(False)
         self._writer = None   # close SequentialWriter via GC
 
     def pause_recording(self):
         self.get_logger().info("Pausing recording…")
         self._recording = False
+        self._recording = False
+        for s in self._topic_stats.values():
+            s.set_recording(False)
 
     def resume_recording(self):
         if self._writer is None:
@@ -100,6 +108,8 @@ class LogboyNode(Node):
             return
         self.get_logger().info("Resuming recording…")
         self._recording = True
+        for s in self._topic_stats.values():
+            s.set_recording(True)
 
     # ════════════════════════════════════════════
     #  Private

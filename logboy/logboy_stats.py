@@ -50,17 +50,23 @@ class TopicStats:
     def record(self) -> None:
         now = time.monotonic()
         with self._lock:
+
             if self._first_seen is None:
                 self._first_seen = time.time()  # real timestamp for first seen
-            self._total_msgs += 1
 
-            if self.expected_fps > 0 and self._last_recv > 0:
-                gap = now - self._last_recv
-                interval = 1.0 / self.expected_fps
-                if gap > interval * 1.8:
-                    self._drops += max(int(gap / interval) - 1, 1)
+            # update frame drops and total_msgs only during recording
+            if self._is_recording:
+                self._total_msgs += 1
+
+                # calculate frame drops based on the time gap since the last message
+                if self.expected_fps > 0 and self._last_recv > 0:
+                    gap = now - self._last_recv
+                    interval = 1.0 / self.expected_fps
+                    if gap > interval * 1.8:
+                        self._drops += max(int(gap / interval) - 1, 1)
 
             self._last_recv = now
+            # timestamps always updated, to keep the FPS calculation accurate
             self._timestamps.append(now)
             self._trim(now)
 
@@ -68,9 +74,10 @@ class TopicStats:
         with self._lock:
             self._is_recording = flag
 
-    def reset_drops(self) -> None:
+    def reset_counts(self) -> None:
         with self._lock:
             self._drops = 0
+            self._total_msgs = 0
 
     # ── Called by the view ──────────────────────
     def snapshot(self) -> TopicSnapshot:
@@ -90,7 +97,7 @@ class TopicStats:
             # Pending drops: Include silence since the last message,
             # but do not write to _drops (record() would count them again)
             pending_drops = 0
-            if self.expected_fps > 0 and self._last_recv > 0:
+            if self._is_recording and self.expected_fps > 0 and self._last_recv > 0:
                 interval = 1.0 / self.expected_fps
                 if age > interval * 1.8:
                     pending_drops = int(age / interval) - 1
