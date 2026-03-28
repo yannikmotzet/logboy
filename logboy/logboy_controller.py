@@ -15,9 +15,12 @@ class LogboyController:
 
     def shutdown(self):
         self._executor.shutdown()
+        self._spin_thread.join()
         if rclpy.ok():
             rclpy.shutdown()
-            self._spin_thread.join()
+
+    def configure_monitor(self):
+        self.node.configure_monitor()
 
     def configure_recorder(self, config):
         self.node.configure_recorder(config)
@@ -42,3 +45,6 @@ class LogboyController:
     
     def get_stats(self):
         return self.node.get_stats()
+
+    def get_bag_path(self):
+        return self.node.get_bag_path()
