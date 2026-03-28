@@ -43,16 +43,24 @@ def fmt_first_seen(ts: float | None) -> str:
 
 # ── Monitor Render ────────────────────────────────────────────────────────────
 
-def build_table(snapshots: list[TopicSnapshot], is_paused: bool, start_time: float) -> Table:
+def build_table(snapshots: list[TopicSnapshot], is_paused: bool, start_time: float, is_recording: bool = True) -> Table:
     elapsed = time.monotonic() - start_time
     h, rem = divmod(int(elapsed), 3600)
     m, s = divmod(rem, 60)
 
-    status = "[yellow]⏸  PAUSED[/yellow]" if is_paused else "[green]⏺  RECORDING[/green]"
+    if not is_recording:
+        status = "[cyan]👁  MONITORING[/cyan]"
+        hint = "\\[Ctrl+C] stop"
+    elif is_paused:
+        status = "[yellow]⏸  PAUSED[/yellow]"
+        hint = "\\[SPACE] pause/resume   \\[Ctrl+C] stop"
+    else:
+        status = "[green]⏺  RECORDING[/green]"
+        hint = "\\[SPACE] pause/resume   \\[Ctrl+C] stop"
+
     title = (
         f"[bold blue]══ Logboy ══[/bold blue]  {status}   "
-        f"[dim]elapsed {h:02d}:{m:02d}:{s:02d}"
-        f"   \\[SPACE] pause/resume   \\[Ctrl+C] stop[/dim]"
+        f"[dim]elapsed {h:02d}:{m:02d}:{s:02d}   {hint}[/dim]"
     )
 
     table = Table(title=title, box=box.SIMPLE, show_footer=True, title_justify="left")
@@ -92,9 +100,10 @@ def monitor_loop(controller: LogboyController,
                  stop_event: threading.Event,
                  start_time: float,
                  live: Live,
-                 refresh: float = 1.0):
+                 refresh: float = 1.0,
+                 is_recording: bool = True):
     while not stop_event.is_set():
-        live.update(build_table(controller.get_stats(), get_paused(), start_time))
+        live.update(build_table(controller.get_stats(), get_paused(), start_time, is_recording))
         time.sleep(refresh)
 
 
@@ -198,6 +207,54 @@ def record(
         os.close(saved_stderr_fd)
 
     console.print("Recording stopped.")
+
+
+@app.command()
+def monitor(
+    config: Path = typer.Option(..., "-c", "--config", help="Path to config YAML", exists=True, file_okay=True, dir_okay=False),
+    refresh: float = typer.Option(1.0, help="Monitor refresh rate in seconds"),
+):
+    """Monitor topics without recording."""
+    cfg = load_config(str(config))
+    validate_config(cfg)
+
+    controller = LogboyController()
+    controller.configure_recorder(cfg)
+
+    stop_event = threading.Event()
+    start_time = time.monotonic()
+
+    stdin_fd = sys.stdin.fileno()
+    old_term_settings = termios.tcgetattr(stdin_fd)
+
+    devnull_fd = os.open(os.devnull, os.O_WRONLY)
+    saved_stderr_fd = os.dup(2)
+    os.dup2(devnull_fd, 2)
+    os.close(devnull_fd)
+
+    try:
+        tty.setcbreak(stdin_fd)
+        with Live(console=console, screen=True, refresh_per_second=4) as live:
+            monitor_thread = threading.Thread(
+                target=monitor_loop,
+                args=(controller, lambda: False, stop_event, start_time, live, refresh, False),
+                daemon=True,
+            )
+            monitor_thread.start()
+
+            try:
+                stop_event.wait()
+            except KeyboardInterrupt:
+                pass
+            finally:
+                stop_event.set()
+                controller.shutdown()
+    finally:
+        termios.tcsetattr(stdin_fd, termios.TCSADRAIN, old_term_settings)
+        os.dup2(saved_stderr_fd, 2)
+        os.close(saved_stderr_fd)
+
+    console.print("Monitor stopped.")
 
 
 def main():
