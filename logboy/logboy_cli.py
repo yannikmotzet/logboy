@@ -28,6 +28,17 @@ def callback(ctx: typer.Context):
 
 # ── TUI Helpers ───────────────────────────────────────────────────────────────
 
+def bag_size(bag_path: str | None) -> str:
+    if not bag_path or not os.path.isdir(bag_path):
+        return ""
+    total = sum(e.stat().st_size for e in os.scandir(bag_path) if e.is_file())
+    for unit in ("B", "KB", "MB", "GB"):
+        if total < 1024:
+            return f"{total:.1f} {unit}"
+        total /= 1024
+    return f"{total:.1f} TB"
+
+
 def fps_style(s: TopicSnapshot) -> str:
     if s.first_seen is None: return "dim"
     if s.age > 5:            return "dim"
@@ -43,7 +54,7 @@ def fmt_first_seen(ts: float | None) -> str:
 
 # ── Monitor Render ────────────────────────────────────────────────────────────
 
-def build_table(snapshots: list[TopicSnapshot], is_paused: bool, start_time: float, is_recording: bool = True) -> Table:
+def build_table(snapshots: list[TopicSnapshot], is_paused: bool, start_time: float, is_recording: bool = True, bag_path: str | None = None) -> Table:
     elapsed = time.monotonic() - start_time
     h, rem = divmod(int(elapsed), 3600)
     m, s = divmod(rem, 60)
@@ -58,9 +69,19 @@ def build_table(snapshots: list[TopicSnapshot], is_paused: bool, start_time: flo
         status = "[green]⏺  RECORDING[/green]"
         hint = "\\[SPACE] pause/resume   \\[Ctrl+C] stop"
 
+    if bag_path:
+        rec_info = (
+            f"\n[dim]  name  [/dim]{os.path.basename(bag_path)}"
+            f"[dim]   path  [/dim]{os.path.dirname(bag_path)}"
+        )
+    else:
+        rec_info = ""
+
     title = (
-        f"[bold blue]══ Logboy ══[/bold blue]  {status}   "
-        f"[dim]elapsed {h:02d}:{m:02d}:{s:02d}   {hint}[/dim]"
+        f"[bold blue]══ Logboy ══[/bold blue]  {status}{rec_info}\n"
+        f"[dim]  elapsed  [/dim]{h:02d}:{m:02d}:{s:02d}"
+        f"[dim]   size  [/dim]{bag_size(bag_path) if bag_path else '—'}"
+        f"[dim]   {hint}[/dim]"
     )
 
     table = Table(title=title, box=box.SIMPLE, show_footer=True, title_justify="left")
@@ -103,7 +124,7 @@ def monitor_loop(controller: LogboyController,
                  refresh: float = 1.0,
                  is_recording: bool = True):
     while not stop_event.is_set():
-        live.update(build_table(controller.get_stats(), get_paused(), start_time, is_recording))
+        live.update(build_table(controller.get_stats(), get_paused(), start_time, is_recording, controller.get_bag_path()))
         time.sleep(refresh)
 
 
@@ -177,7 +198,7 @@ def record(
                 else:
                     controller.pause_recording()
                 is_paused = not is_paused
-                live.update(build_table(controller.get_stats(), is_paused, start_time))
+                live.update(build_table(controller.get_stats(), is_paused, start_time, True, controller.get_bag_path()))
 
             monitor_thread = threading.Thread(
                 target=monitor_loop,

@@ -42,3 +42,6 @@ class LogboyController:
     
     def get_stats(self):
         return self.node.get_stats()
+
+    def get_bag_path(self):
+        return self.node.get_bag_path()

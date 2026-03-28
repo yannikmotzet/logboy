@@ -22,6 +22,7 @@ class LogboyNode(Node):
         self._subscriptions = []   # always active (Monitor)
         self._writer = None
         self._recording = False    # controls if __callback writes into bag
+        self._bag_path = None
 
     # ════════════════════════════════════════════
     #  Public – View-Interface
@@ -29,6 +30,9 @@ class LogboyNode(Node):
 
     def get_stats(self) -> list[TopicSnapshot]:
         return [s.snapshot() for s in self._topic_stats.values()]
+
+    def get_bag_path(self) -> str | None:
+        return self._bag_path
 
     # ════════════════════════════════════════════
     #  configuration
@@ -80,9 +84,9 @@ class LogboyNode(Node):
             self.get_logger().warn("Already recording.")
             return
 
-        bag_path = self.__get_bag_file_path()
-        self.get_logger().info(f"Recording to: {bag_path}")
-        self.__create_writer(bag_path)
+        self._bag_path = self.__get_bag_file_path()
+        self.get_logger().info(f"Recording to: {self._bag_path}")
+        self.__create_writer(self._bag_path)
         self._recording = True
         for s in self._topic_stats.values():
             s.reset_counts()
@@ -94,6 +98,7 @@ class LogboyNode(Node):
         for s in self._topic_stats.values():
             s.set_recording(False)
         self._writer = None   # close SequentialWriter via GC
+        self._bag_path = None
 
     def pause_recording(self):
         self.get_logger().info("Pausing recording…")
