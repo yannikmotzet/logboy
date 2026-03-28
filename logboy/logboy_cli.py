@@ -164,12 +164,25 @@ def validate_config(config: dict):
 
 @app.command()
 def record(
-    config: Path = typer.Option(..., "-c", "--config", help="Path to config YAML", exists=True, file_okay=True, dir_okay=False),
-    refresh: float = typer.Option(1.0, help="Monitor refresh rate in seconds"),
+    config:  Path = typer.Option(None,    "-c", "--config",  help="Path to config YAML (optional if --storage and --robot are provided)", exists=True, file_okay=True, dir_okay=False),
+    storage: Path = typer.Option(None,          "--storage", help="Storage path for the bag (required if no --config)"),
+    robot:   str  = typer.Option(None,          "--robot",   help="Robot name used in the bag filename (required if no --config)"),
+    plugin:  str  = typer.Option("mcap",        "--plugin",  help="ROS2 storage plugin"),
+    refresh: float = typer.Option(1.0,          help="Monitor refresh rate in seconds"),
 ):
     """Start recording."""
-    cfg = load_config(str(config))
-    validate_config(cfg)
+    if config:
+        cfg = load_config(str(config))
+        validate_config(cfg)
+    else:
+        if not storage or not robot:
+            raise typer.BadParameter("--storage and --robot are required when --config is not provided.")
+        cfg = {
+            "storage_path":      str(storage),
+            "robot_name":        robot,
+            "topics":            None,
+            "ros_storage_plugin": plugin,
+        }
 
     # Suppress ROS2 logger output (writes directly to fd 2, bypassing sys.stderr)
     devnull_fd = os.open(os.devnull, os.O_WRONLY)

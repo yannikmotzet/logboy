@@ -43,7 +43,7 @@ class LogboyNode(Node):
         self.set_rec_topics_all()
 
     def configure_recorder(self, config):
-        mandatory_keys = ['storage_path', 'robot_name', 'topics']
+        mandatory_keys = ['storage_path', 'robot_name']
         for key in mandatory_keys:
             if key not in config or not config[key]:
                 raise ValueError(f"Mandatory key '{key}' is missing or empty.")
