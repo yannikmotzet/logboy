@@ -1,5 +1,6 @@
 from nicegui import ui
 import os
+import time
 import yaml
 import argparse
 from datetime import datetime
@@ -20,6 +21,7 @@ class LogboyGUI:
         self.assets_dir = os.path.join(paths[0], 'share', 'logboy', 'assets')
 
         self._blink_state = False
+        self._record_start_time: float | None = None
         self._build_ui()
 
     # ── Build ────────────────────────────────────────────────────────────────
@@ -38,6 +40,20 @@ class LogboyGUI:
 
         self.status_label = ui.label('Status: Ready').classes('text-lg text-center w-full mt-2')
 
+        # Recording info panel
+        with ui.row().classes('items-center justify-center w-full gap-8 mt-1') as self.rec_info_row:
+            with ui.column().classes('items-center gap-0 w-64'):
+                ui.label('Name').classes('text-xs text-gray-400')
+                self.rec_name_label = ui.label('—').classes('text-sm font-mono text-center')
+            with ui.column().classes('items-center gap-0 w-48'):
+                ui.label('Location').classes('text-xs text-gray-400')
+                self.rec_path_label = ui.label(os.path.expanduser(self.config.get('storage_path', '—'))).classes('text-sm font-mono text-center')
+            with ui.column().classes('items-center gap-0 w-24'):
+                ui.label('Elapsed').classes('text-xs text-gray-400')
+                self.elapsed_label = ui.label('—').classes('text-sm font-mono text-center')
+            with ui.column().classes('items-center gap-0 w-24'):
+                ui.label('Size').classes('text-xs text-gray-400')
+                self.size_label = ui.label('—').classes('text-sm font-mono text-center')
         # Topic monitor table
         ui.separator().classes('my-4')
         columns = [
@@ -93,6 +109,7 @@ class LogboyGUI:
 
     def start_recording(self):
         self.controller.start_recording()
+        self._record_start_time = time.monotonic()
         self.is_paused = False
         self.status_label.set_text('Status: Recording')
         self._set_enabled(self.record_btn, False)
@@ -102,6 +119,7 @@ class LogboyGUI:
 
     def stop_recording(self):
         self.controller.stop_recording()
+        self._record_start_time = None
         self.is_paused = False
         self.status_label.set_text('Status: Stopped')
         self.blink_timer.deactivate()
@@ -111,6 +129,9 @@ class LogboyGUI:
         self._set_enabled(self.record_btn, True)
         self._set_enabled(self.stop_btn,   False)
         self._set_enabled(self.pause_btn,  False)
+        self.rec_name_label.set_text('—')
+        self.elapsed_label.set_text('—')
+        self.size_label.set_text('—')
 
     def toggle_pause(self):
         if not self.is_paused:
@@ -134,6 +155,33 @@ class LogboyGUI:
         snapshots: list[TopicSnapshot] = self.controller.get_stats()
         self.table.rows = [self._snapshot_to_row(s) for s in sorted(snapshots, key=lambda s: s.name)]
         self.table.update()
+        self._refresh_rec_info()
+
+    def _refresh_rec_info(self):
+        if self._record_start_time is None:
+            return
+        bag_path = self.controller.get_bag_path()
+        # elapsed
+        elapsed = int(time.monotonic() - self._record_start_time)
+        h, rem = divmod(elapsed, 3600)
+        m, s = divmod(rem, 60)
+        self.elapsed_label.set_text(f'{h:02d}:{m:02d}:{s:02d}')
+        # name and path
+        if bag_path:
+            self.rec_name_label.set_text(os.path.basename(bag_path))
+            self.rec_path_label.set_text(os.path.dirname(bag_path))
+            self.size_label.set_text(self._bag_size(bag_path))
+
+    @staticmethod
+    def _bag_size(bag_path: str) -> str:
+        if not os.path.isdir(bag_path):
+            return '—'
+        total = sum(e.stat().st_size for e in os.scandir(bag_path) if e.is_file())
+        for unit in ('B', 'KB', 'MB', 'GB'):
+            if total < 1024:
+                return f'{total:.1f} {unit}'
+            total /= 1024
+        return f'{total:.1f} TB'
 
     @staticmethod
     def _snapshot_to_row(s: TopicSnapshot) -> dict:
