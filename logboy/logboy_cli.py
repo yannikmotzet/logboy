@@ -1,17 +1,23 @@
 import typer
 import yaml
-import os
 import sys
+import os
 import tty
 import termios
 import threading
 import time
 from pathlib import Path
 from datetime import datetime
+from rich.live import Live
+from rich.table import Table
+from rich.text import Text
+from rich.console import Console
+from rich import box
 from logboy.logboy_controller import LogboyController
 from logboy.logboy_stats import TopicSnapshot
 
 app = typer.Typer(invoke_without_command=True, add_completion=False)
+console = Console()
 
 
 @app.callback()
@@ -20,88 +26,63 @@ def callback(ctx: typer.Context):
         typer.echo(ctx.get_help())
 
 
-# ── Terminal Helpers ─────────────────────────────────────────────────────────
+# ── TUI Helpers ───────────────────────────────────────────────────────────────
 
-class RawModeStream:
-    """Wraps a stream to replace \n with \r\n for raw terminal mode."""
-    def __init__(self, stream):
-        self._stream = stream
-
-    def write(self, data):
-        self._stream.write(data.replace('\n', '\r\n'))
-
-    def flush(self):
-        self._stream.flush()
-
-    def __getattr__(self, attr):
-        return getattr(self._stream, attr)
-
-
-def clear():
-    os.system("clear")
+def fps_style(s: TopicSnapshot) -> str:
+    if s.first_seen is None: return "dim"
+    if s.age > 5:            return "dim"
+    if s.fps < 1:            return "red"
+    return "green"
 
 
 def fmt_first_seen(ts: float | None) -> str:
     if ts is None:
-        return "   —"
+        return "—"
     return datetime.fromtimestamp(ts).strftime("%H:%M:%S")
-
-
-def fps_color(s: TopicSnapshot) -> str:
-    if s.first_seen is None: return "\033[90m"   # gray  – no message yet
-    if s.age > 5:            return "\033[90m"   # gray  – dead
-    if s.fps < 1:            return "\033[91m"   # red
-    return "\033[92m"                            # green
 
 
 # ── Monitor Render ────────────────────────────────────────────────────────────
 
-def render(snapshots: list[TopicSnapshot], is_paused: bool, start_time: float):
-    R = "\033[0m"
+def build_table(snapshots: list[TopicSnapshot], is_paused: bool, start_time: float) -> Table:
     elapsed = time.monotonic() - start_time
     h, rem = divmod(int(elapsed), 3600)
-    m, s   = divmod(rem, 60)
+    m, s = divmod(rem, 60)
 
-    status = "\033[93m⏸  PAUSED\033[0m" if is_paused else "\033[92m⏺  RECORDING\033[0m"
+    status = "[yellow]⏸  PAUSED[/yellow]" if is_paused else "[green]⏺  RECORDING[/green]"
+    title = (
+        f"[bold blue]══ Logboy ══[/bold blue]  {status}   "
+        f"[dim]elapsed {h:02d}:{m:02d}:{s:02d}"
+        f"   \\[SPACE] pause/resume   \\[Ctrl+C] stop[/dim]"
+    )
 
-    clear()
-    print(f"\n\033[1;34m  ══ Logboy ══\033[0m  {status}   "
-          f"\033[90melapsed {h:02d}:{m:02d}:{s:02d}"
-          f"   [SPACE] pause/resume   [Ctrl+C] stop\033[0m\n")
-
-    col_w = 44
-    print(f"  {'TOPIC':<{col_w}} {'EXP FPS':>8} {'FPS':>7} {'DROPS':>7} {'MSGS':>7} {'AGE':>8}")
-    print("  " + "─" * 86)
+    table = Table(title=title, box=box.SIMPLE, show_footer=True, title_justify="left")
+    table.add_column("TOPIC", style="cyan", footer=f"[dim]{len(snapshots)} topic(s)[/dim]")
+    table.add_column("EXP FPS", justify="right", style="dim")
+    table.add_column("FPS", justify="right")
+    table.add_column("DROPS", justify="right")
+    table.add_column("MSGS", justify="right")
+    table.add_column("AGE", justify="right")
 
     for s in sorted(snapshots, key=lambda x: x.name):
-        fc = fps_color(s)
-        dc = "\033[91m" if s.drops > 0 else "\033[92m"
-        exp_str = f"{s.expected_fps:>7.1f}" if s.expected_fps else "      —"
+        exp_str = f"{s.expected_fps:.1f}" if s.expected_fps else "—"
 
         if not s.first_seen:
-            age_str = f"\033[90m{'—':>7}{R}"
-            fps_str = f"\033[90m{'—':>7}{R}"
+            fps_str = Text("—", style="dim")
+            age_str = Text("—", style="dim")
         else:
-            fps_str = f"{fc}{s.fps:>7.1f}{R}"
+            fps_str = Text(f"{s.fps:.1f}", style=fps_style(s))
             if s.age > 5:
-                age_color = "\033[91m"   # rot  – topic tot
+                age_style = "red"
             elif s.expected_fps > 0 and s.age > 1.0 / s.expected_fps * 3:
-                age_color = "\033[93m"   # gelb – deutlich überfällig
+                age_style = "yellow"
             else:
-                age_color = "\033[92m"   # grün
-            age_str = f"{age_color}{s.age:>7.1f}s{R}"
+                age_style = "green"
+            age_str = Text(f"{s.age:.1f}s", style=age_style)
 
-        print(
-            f"  \033[36m{s.name:<{col_w}}{R}"
-            f" \033[90m{exp_str}{R}"
-            f" {fps_str}"
-            f" {dc}{s.drops:>7}{R}"
-            f" {s.total_msgs:>7}"
-            f" {age_str}"
-        )
+        drops_str = Text(str(s.drops), style="red" if s.drops > 0 else "green")
+        table.add_row(s.name, exp_str, fps_str, drops_str, str(s.total_msgs), age_str)
 
-    print("  " + "─" * 86)
-    print(f"  \033[90m{len(snapshots)} topic(s)\033[0m\n")
+    return table
 
 
 # ── Monitor Loop ──────────────────────────────────────────────────────────────
@@ -110,9 +91,10 @@ def monitor_loop(controller: LogboyController,
                  get_paused,
                  stop_event: threading.Event,
                  start_time: float,
+                 live: Live,
                  refresh: float = 1.0):
     while not stop_event.is_set():
-        render(controller.get_stats(), get_paused(), start_time)
+        live.update(build_table(controller.get_stats(), get_paused(), start_time))
         time.sleep(refresh)
 
 
@@ -121,11 +103,8 @@ def monitor_loop(controller: LogboyController,
 def read_keypresses(pause_callback, stop_event):
     fd = sys.stdin.fileno()
     old_settings = termios.tcgetattr(fd)
-    old_stdout, old_stderr = sys.stdout, sys.stderr
     try:
         tty.setcbreak(fd)
-        sys.stdout = RawModeStream(old_stdout)
-        sys.stderr = RawModeStream(old_stderr)
         while not stop_event.is_set():
             ch = sys.stdin.read(1)
             if ch == ' ':
@@ -134,7 +113,6 @@ def read_keypresses(pause_callback, stop_event):
                 stop_event.set()
                 break
     finally:
-        sys.stdout, sys.stderr = old_stdout, old_stderr
         termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
 
 
@@ -171,37 +149,55 @@ def record(
     stop_event = threading.Event()
     start_time = time.monotonic()
 
-    def toggle_pause():
-        nonlocal is_paused
-        if is_paused:
-            controller.resume_recording()
-        else:
-            controller.pause_recording()
-        is_paused = not is_paused
+    # Save terminal state before entering raw mode
+    stdin_fd = sys.stdin.fileno()
+    old_term_settings = termios.tcgetattr(stdin_fd)
 
-    monitor_thread = threading.Thread(
-        target=monitor_loop,
-        args=(controller, lambda: is_paused, stop_event, start_time, refresh),
-        daemon=True,
-    )
-    key_thread = threading.Thread(
-        target=read_keypresses,
-        args=(toggle_pause, stop_event),
-        daemon=True,
-    )
-
-    monitor_thread.start()
-    key_thread.start()
+    # Suppress ROS2 logger output (writes directly to fd 2, bypassing sys.stderr)
+    devnull_fd = os.open(os.devnull, os.O_WRONLY)
+    saved_stderr_fd = os.dup(2)
+    os.dup2(devnull_fd, 2)
+    os.close(devnull_fd)
 
     try:
-        stop_event.wait()
-    except KeyboardInterrupt:
-        pass
+        with Live(console=console, screen=True, refresh_per_second=4) as live:
+            def toggle_pause():
+                nonlocal is_paused
+                if is_paused:
+                    controller.resume_recording()
+                else:
+                    controller.pause_recording()
+                is_paused = not is_paused
+                live.update(build_table(controller.get_stats(), is_paused, start_time))
+
+            monitor_thread = threading.Thread(
+                target=monitor_loop,
+                args=(controller, lambda: is_paused, stop_event, start_time, live, refresh),
+                daemon=True,
+            )
+            key_thread = threading.Thread(
+                target=read_keypresses,
+                args=(toggle_pause, stop_event),
+                daemon=True,
+            )
+
+            monitor_thread.start()
+            key_thread.start()
+
+            try:
+                stop_event.wait()
+            except KeyboardInterrupt:
+                pass
+            finally:
+                stop_event.set()
+                controller.stop_recording()
+                controller.shutdown()
     finally:
-        controller.stop_recording()
-        controller.shutdown()
-        clear()
-        print("Recording stopped.")
+        termios.tcsetattr(stdin_fd, termios.TCSADRAIN, old_term_settings)
+        os.dup2(saved_stderr_fd, 2)
+        os.close(saved_stderr_fd)
+
+    console.print("Recording stopped.")
 
 
 def main():
