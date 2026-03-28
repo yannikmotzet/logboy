@@ -15,9 +15,9 @@ class LogboyController:
 
     def shutdown(self):
         self._executor.shutdown()
+        self._spin_thread.join()
         if rclpy.ok():
             rclpy.shutdown()
-            self._spin_thread.join()
 
     def configure_monitor(self):
         self.node.configure_monitor()
