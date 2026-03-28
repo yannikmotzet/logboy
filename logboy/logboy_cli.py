@@ -220,6 +220,8 @@ def record(
                 pass
             finally:
                 stop_event.set()
+                final_bag_path = controller.get_bag_path()
+                final_stats = controller.get_stats()
                 controller.stop_recording()
                 controller.shutdown()
     finally:
@@ -227,7 +229,31 @@ def record(
         os.dup2(saved_stderr_fd, 2)
         os.close(saved_stderr_fd)
 
-    console.print("Recording stopped.")
+    elapsed = time.monotonic() - start_time
+    h, rem = divmod(int(elapsed), 3600)
+    m, s = divmod(rem, 60)
+
+    summary = Table(box=box.SIMPLE, show_header=False, title="[bold]Recording stopped[/bold]", title_justify="left")
+    summary.add_column(style="dim", justify="right")
+    summary.add_column()
+    summary.add_row("name",     os.path.basename(final_bag_path) if final_bag_path else "—")
+    summary.add_row("path",     os.path.dirname(final_bag_path)  if final_bag_path else "—")
+    summary.add_row("duration", f"{h:02d}:{m:02d}:{s:02d}")
+    summary.add_row("size",     bag_size(final_bag_path)         if final_bag_path else "—")
+    console.print(summary)
+
+    topics_table = Table(box=box.SIMPLE, title_justify="left")
+    topics_table.add_column("TOPIC", style="cyan")
+    topics_table.add_column("EXP FPS", justify="right", style="dim")
+    topics_table.add_column("FPS",   justify="right")
+    topics_table.add_column("MSGS",  justify="right")
+    topics_table.add_column("DROPS", justify="right")
+    for s in sorted(final_stats, key=lambda x: x.name):
+        exp_str = f"{s.expected_fps:.1f}" if s.expected_fps else "—"
+        fps_str = Text(f"{s.fps:.1f}", style=fps_style(s))
+        drops_str = Text(str(s.drops), style="red" if s.drops > 0 else "green")
+        topics_table.add_row(s.name, exp_str, fps_str, str(s.total_msgs), drops_str)
+    console.print(topics_table)
 
 
 @app.command()
@@ -269,13 +295,25 @@ def monitor(
                 pass
             finally:
                 stop_event.set()
+                final_stats = controller.get_stats()
                 controller.shutdown()
     finally:
         termios.tcsetattr(stdin_fd, termios.TCSADRAIN, old_term_settings)
         os.dup2(saved_stderr_fd, 2)
         os.close(saved_stderr_fd)
 
-    console.print("Monitor stopped.")
+    topics_table = Table(box=box.SIMPLE, title="[bold]Monitor stopped[/bold]", title_justify="left")
+    topics_table.add_column("TOPIC", style="cyan")
+    topics_table.add_column("EXP FPS", justify="right", style="dim")
+    topics_table.add_column("FPS",   justify="right")
+    topics_table.add_column("MSGS",  justify="right")
+    topics_table.add_column("DROPS", justify="right")
+    for s in sorted(final_stats, key=lambda x: x.name):
+        exp_str = f"{s.expected_fps:.1f}" if s.expected_fps else "—"
+        fps_str = Text(f"{s.fps:.1f}", style=fps_style(s))
+        drops_str = Text(str(s.drops), style="red" if s.drops > 0 else "green")
+        topics_table.add_row(s.name, exp_str, fps_str, str(s.total_msgs), drops_str)
+    console.print(topics_table)
 
 
 def main():
