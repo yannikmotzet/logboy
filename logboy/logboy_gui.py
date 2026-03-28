@@ -21,7 +21,8 @@ class LogboyGUI:
         self.assets_dir = os.path.join(paths[0], 'share', 'logboy', 'assets')
 
         self._blink_state = False
-        self._record_start_time: float | None = None
+        self._ui_recording = False   # last known UI state
+        self._ui_paused    = False
         self._build_ui()
 
     # ── Build ────────────────────────────────────────────────────────────────
@@ -109,7 +110,6 @@ class LogboyGUI:
 
     def start_recording(self):
         self.controller.start_recording()
-        self._record_start_time = time.monotonic()
         self.is_paused = False
         self.status_label.set_text('Status: Recording')
         self._set_enabled(self.record_btn, False)
@@ -119,7 +119,6 @@ class LogboyGUI:
 
     def stop_recording(self):
         self.controller.stop_recording()
-        self._record_start_time = None
         self.is_paused = False
         self.status_label.set_text('Status: Stopped')
         self.blink_timer.deactivate()
@@ -129,9 +128,6 @@ class LogboyGUI:
         self._set_enabled(self.record_btn, True)
         self._set_enabled(self.stop_btn,   False)
         self._set_enabled(self.pause_btn,  False)
-        self.rec_name_label.set_text('—')
-        self.elapsed_label.set_text('—')
-        self.size_label.set_text('—')
 
     def toggle_pause(self):
         if not self.is_paused:
@@ -155,14 +151,54 @@ class LogboyGUI:
         snapshots: list[TopicSnapshot] = self.controller.get_stats()
         self.table.rows = [self._snapshot_to_row(s) for s in sorted(snapshots, key=lambda s: s.name)]
         self.table.update()
+        self._sync_state()
         self._refresh_rec_info()
 
+    def _sync_state(self):
+        """Sync button/status state from the controller (handles multi-tab and page reload)."""
+        is_recording = self.controller.get_bag_path() is not None
+        is_paused    = self.controller.is_paused()
+
+        if is_recording == self._ui_recording and is_paused == self._ui_paused:
+            return  # nothing changed
+
+        if not is_recording:
+            self.status_label.set_text('Status: Stopped' if self._ui_recording else 'Status: Ready')
+            self._set_enabled(self.record_btn, True)
+            self._set_enabled(self.stop_btn,   False)
+            self._set_enabled(self.pause_btn,  False)
+            self.blink_timer.deactivate()
+            self.blink_pause_timer.deactivate()
+            self.record_btn.set_source(self._asset('rec-button.png'))
+            self.pause_btn.set_source(self._asset('pause.png'))
+        elif is_paused:
+            self.status_label.set_text('Status: Paused')
+            self._set_enabled(self.record_btn, False)
+            self._set_enabled(self.stop_btn,   True)
+            self._set_enabled(self.pause_btn,  True)
+            self.blink_timer.deactivate()
+            self.record_btn.set_source(self._asset('rec-button.png'))
+            self.blink_pause_timer.activate()
+        else:
+            self.status_label.set_text('Status: Recording')
+            self._set_enabled(self.record_btn, False)
+            self._set_enabled(self.stop_btn,   True)
+            self._set_enabled(self.pause_btn,  True)
+            self.blink_pause_timer.deactivate()
+            self.pause_btn.set_source(self._asset('pause.png'))
+            self.blink_timer.activate()
+
+        self._ui_recording = is_recording
+        self._ui_paused    = is_paused
+        self.is_paused     = is_paused
+
     def _refresh_rec_info(self):
-        if self._record_start_time is None:
+        start_time = self.controller.get_record_start_time()
+        if start_time is None:
             return
         bag_path = self.controller.get_bag_path()
         # elapsed
-        elapsed = int(time.monotonic() - self._record_start_time)
+        elapsed = int(time.monotonic() - start_time)
         h, rem = divmod(elapsed, 3600)
         m, s = divmod(rem, 60)
         self.elapsed_label.set_text(f'{h:02d}:{m:02d}:{s:02d}')

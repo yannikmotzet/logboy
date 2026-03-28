@@ -34,6 +34,9 @@ class LogboyNode(Node):
     def get_bag_path(self) -> str | None:
         return self._bag_path
 
+    def is_paused(self) -> bool:
+        return self._bag_path is not None and not self._recording
+
     # ════════════════════════════════════════════
     #  configuration
     # ════════════════════════════════════════════
