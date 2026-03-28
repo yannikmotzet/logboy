@@ -19,6 +19,9 @@ class LogboyController:
             rclpy.shutdown()
             self._spin_thread.join()
 
+    def configure_monitor(self):
+        self.node.configure_monitor()
+
     def configure_recorder(self, config):
         self.node.configure_recorder(config)
 

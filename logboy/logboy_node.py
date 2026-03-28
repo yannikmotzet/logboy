@@ -38,6 +38,10 @@ class LogboyNode(Node):
     #  configuration
     # ════════════════════════════════════════════
 
+    def configure_monitor(self, stats_window: float = 2.0):
+        self._stats_window = stats_window
+        self.set_rec_topics_all()
+
     def configure_recorder(self, config):
         mandatory_keys = ['storage_path', 'robot_name', 'topics']
         for key in mandatory_keys:

@@ -171,6 +171,12 @@ def record(
     cfg = load_config(str(config))
     validate_config(cfg)
 
+    # Suppress ROS2 logger output (writes directly to fd 2, bypassing sys.stderr)
+    devnull_fd = os.open(os.devnull, os.O_WRONLY)
+    saved_stderr_fd = os.dup(2)
+    os.dup2(devnull_fd, 2)
+    os.close(devnull_fd)
+
     controller = LogboyController()
     controller.configure_recorder(cfg)
     controller.start_recording()
@@ -182,12 +188,6 @@ def record(
     # Save terminal state before entering raw mode
     stdin_fd = sys.stdin.fileno()
     old_term_settings = termios.tcgetattr(stdin_fd)
-
-    # Suppress ROS2 logger output (writes directly to fd 2, bypassing sys.stderr)
-    devnull_fd = os.open(os.devnull, os.O_WRONLY)
-    saved_stderr_fd = os.dup(2)
-    os.dup2(devnull_fd, 2)
-    os.close(devnull_fd)
 
     try:
         with Live(console=console, screen=True, refresh_per_second=4) as live:
@@ -258,26 +258,29 @@ def record(
 
 @app.command()
 def monitor(
-    config: Path = typer.Option(..., "-c", "--config", help="Path to config YAML", exists=True, file_okay=True, dir_okay=False),
+    config: Path = typer.Option(None, "-c", "--config", help="Path to config YAML", exists=True, file_okay=True, dir_okay=False),
     refresh: float = typer.Option(1.0, help="Monitor refresh rate in seconds"),
 ):
-    """Monitor topics without recording."""
-    cfg = load_config(str(config))
-    validate_config(cfg)
+    """Monitor topics without recording. Without --config all topics are discovered automatically."""
+    # Suppress ROS2 logger output (writes directly to fd 2, bypassing sys.stderr)
+    devnull_fd = os.open(os.devnull, os.O_WRONLY)
+    saved_stderr_fd = os.dup(2)
+    os.dup2(devnull_fd, 2)
+    os.close(devnull_fd)
 
     controller = LogboyController()
-    controller.configure_recorder(cfg)
+    if config:
+        cfg = load_config(str(config))
+        validate_config(cfg)
+        controller.configure_recorder(cfg)
+    else:
+        controller.configure_monitor()
 
     stop_event = threading.Event()
     start_time = time.monotonic()
 
     stdin_fd = sys.stdin.fileno()
     old_term_settings = termios.tcgetattr(stdin_fd)
-
-    devnull_fd = os.open(os.devnull, os.O_WRONLY)
-    saved_stderr_fd = os.dup(2)
-    os.dup2(devnull_fd, 2)
-    os.close(devnull_fd)
 
     try:
         tty.setcbreak(stdin_fd)
