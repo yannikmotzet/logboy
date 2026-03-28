@@ -1,4 +1,4 @@
-import argparse
+import typer
 import yaml
 import os
 import sys
@@ -6,9 +6,18 @@ import tty
 import termios
 import threading
 import time
+from pathlib import Path
 from datetime import datetime
 from logboy.logboy_controller import LogboyController
 from logboy.logboy_stats import TopicSnapshot
+
+app = typer.Typer(invoke_without_command=True, add_completion=False)
+
+
+@app.callback()
+def callback(ctx: typer.Context):
+    if ctx.invoked_subcommand is None:
+        typer.echo(ctx.get_help())
 
 
 # ── Terminal Helpers ─────────────────────────────────────────────────────────
@@ -143,60 +152,60 @@ def validate_config(config: dict):
             raise ValueError(f"Missing required config key: '{key}'")
 
 
-# ── Main ──────────────────────────────────────────────────────────────────────
+# ── Commands ──────────────────────────────────────────────────────────────────
 
-def main():
-    parser = argparse.ArgumentParser(description="Logboy CLI tool")
-    subparsers = parser.add_subparsers(dest="command", required=True)
-    subparsers.add_parser('record', help="Start recording")
-    parser.add_argument('--config',   type=str, required=True, help="Path to config YAML")
-    parser.add_argument('--refresh',  type=float, default=1.0, help="Monitor refresh rate in seconds")
-    args = parser.parse_args()
-
-    config = load_config(args.config)
-    validate_config(config)
+@app.command()
+def record(
+    config: Path = typer.Option(..., "-c", "--config", help="Path to config YAML", exists=True, file_okay=True, dir_okay=False),
+    refresh: float = typer.Option(1.0, help="Monitor refresh rate in seconds"),
+):
+    """Start recording."""
+    cfg = load_config(str(config))
+    validate_config(cfg)
 
     controller = LogboyController()
-    controller.configure_recorder(config)  # path validation happens here
+    controller.configure_recorder(cfg)
+    controller.start_recording()
 
-    if args.command == "record":
-        controller.start_recording()
+    is_paused = False
+    stop_event = threading.Event()
+    start_time = time.monotonic()
 
-        is_paused = False
-        stop_event = threading.Event()
-        start_time = time.monotonic()
+    def toggle_pause():
+        nonlocal is_paused
+        if is_paused:
+            controller.resume_recording()
+        else:
+            controller.pause_recording()
+        is_paused = not is_paused
 
-        def toggle_pause():
-            nonlocal is_paused
-            if is_paused:
-                controller.resume_recording()
-            else:
-                controller.pause_recording()
-            is_paused = not is_paused
+    monitor_thread = threading.Thread(
+        target=monitor_loop,
+        args=(controller, lambda: is_paused, stop_event, start_time, refresh),
+        daemon=True,
+    )
+    key_thread = threading.Thread(
+        target=read_keypresses,
+        args=(toggle_pause, stop_event),
+        daemon=True,
+    )
 
-        monitor_thread = threading.Thread(
-            target=monitor_loop,
-            args=(controller, lambda: is_paused, stop_event, start_time, args.refresh),
-            daemon=True,
-        )
-        key_thread = threading.Thread(
-            target=read_keypresses,
-            args=(toggle_pause, stop_event),
-            daemon=True,
-        )
+    monitor_thread.start()
+    key_thread.start()
 
-        monitor_thread.start()
-        key_thread.start()
+    try:
+        stop_event.wait()
+    except KeyboardInterrupt:
+        pass
+    finally:
+        controller.stop_recording()
+        controller.shutdown()
+        clear()
+        print("Recording stopped.")
 
-        try:
-            stop_event.wait()
-        except KeyboardInterrupt:
-            pass
-        finally:
-            controller.stop_recording()
-            controller.shutdown()
-            clear()
-            print("Recording stopped.")
+
+def main():
+    app()
 
 
 if __name__ == "__main__":

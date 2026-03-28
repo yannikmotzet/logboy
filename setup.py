@@ -15,7 +15,7 @@ setup(
         ('share/' + package_name + '/config', glob.glob('config/*')),  # Use glob for config
         ('share/' + package_name + '/launch', glob.glob('launch/*')),  # Added launch folder
     ],
-    install_requires=['setuptools', 'pyyaml'],  # Added pyyaml
+    install_requires=['setuptools', 'pyyaml', 'typer'],  # Added pyyaml
     zip_safe=True,
     maintainer='Yannik Motzet',
     maintainer_email='yannik.motzet@outlook.com',
