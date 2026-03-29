@@ -24,18 +24,7 @@ class LogboyGUI:
     # ── Build ────────────────────────────────────────────────────────────────
 
     def _build_ui(self):
-        # Header with logo and dark mode toggle
-        with ui.row().classes('items-center w-full mt-4 px-4'):
-            ui.element('div').classes('flex-1')
-            with ui.row().classes('items-center gap-3'):
-                ui.image('/assets/logboy_logo.png').classes('w-12 h-12')
-                ui.label('logboy').classes('text-3xl font-bold')
-            with ui.row().classes('flex-1 justify-end items-center gap-3'):
-                self.clock_label = ui.label().classes('text-sm font-mono text-gray-400')
-                self.dark = ui.dark_mode(value=True)
-                self.dark_btn = ui.button(icon='dark_mode', on_click=self._toggle_dark).props('flat round')
-
-        # Settings dialog
+        # Settings dialog (not visible, defined first so inputs exist before top bar references them)
         with ui.dialog() as self.settings_dialog, ui.card().classes('w-72'):
             with ui.row().classes('items-center justify-between w-full mb-2'):
                 ui.label('Recording options').classes('text-base font-semibold')
@@ -56,23 +45,33 @@ class LogboyGUI:
                         .on('change', self._update_settings_summary) \
                         .on('clear', self._clear_delay)
 
-        # Transport controls
-        with ui.row().classes('items-center justify-center w-full mt-4 gap-2'):
-            self.record_btn = ui.button(icon='fiber_manual_record', on_click=self.start_recording) \
-                .props('round flat size="xl" color="red"')
-            self.stop_btn = ui.button(icon='stop', on_click=self.stop_recording) \
-                .props('round flat size="xl" color="grey-6"')
-            self.stop_btn.set_visibility(False)
-            self.pause_btn = ui.button(icon='pause', on_click=self.toggle_pause) \
-                .props('round flat size="xl" color="grey" disable')
-            self.settings_btn = ui.button(icon='settings', on_click=self.settings_dialog.open) \
-                .props('round flat color="grey-6"')
+        # Compact top bar — buttons are absolutely pinned to centre, nothing can move them
+        with ui.element('div').classes('relative flex items-center w-full px-4 py-2 min-h-12'):
+            # Buttons + status: absolutely centred, fixed total width so buttons never move
+            with ui.row().classes('absolute left-1/2 -translate-x-1/2 items-center gap-1'):
+                self.record_btn = ui.button(icon='fiber_manual_record', on_click=self.start_recording) \
+                    .props('round flat color="red"')
+                self.stop_btn = ui.button(icon='stop', on_click=self.stop_recording) \
+                    .props('round flat color="grey-6"')
+                self.stop_btn.set_visibility(False)
+                self.pause_btn = ui.button(icon='pause', on_click=self.toggle_pause) \
+                    .props('round flat color="grey" disable')
+                self.settings_btn = ui.button(icon='settings', on_click=self.settings_dialog.open) \
+                    .props('round flat color="grey-6"')
+                self.rec_indicator = ui.icon('fiber_manual_record', size='xs').classes('text-transparent ml-2')
+                self.status_label = ui.label('Ready').classes('text-sm w-36')
 
-        with ui.row().classes('items-center justify-center w-full mt-2 gap-1'):
-            self.rec_indicator = ui.icon('fiber_manual_record', size='sm').classes('text-transparent')
-            self.status_label = ui.label('Ready').classes('text-lg')
+            # Left: logo + title
+            with ui.row().classes('items-center gap-2'):
+                ui.image('/assets/logboy_logo.png').classes('w-7 h-7')
+                ui.label('logboy').classes('text-lg font-bold')
 
-        self.settings_summary = ui.label('').classes('text-xs text-gray-500 text-center w-full mt-1')
+            # Right: summary + clock + dark toggle
+            with ui.row().classes('items-center gap-2 ml-auto'):
+                self.settings_summary = ui.label('').classes('text-xs text-gray-500 font-mono')
+                self.clock_label = ui.label().classes('text-xs font-mono text-gray-400')
+                self.dark = ui.dark_mode(value=True)
+                self.dark_btn = ui.button(icon='dark_mode', on_click=self._toggle_dark).props('flat round dense')
 
         # pre-populate max_duration from config if set
         cfg_max = self.config.get('max_duration')
@@ -82,7 +81,7 @@ class LogboyGUI:
             self._update_settings_summary()
 
         # Recording info panel
-        with ui.row().classes('items-center justify-center w-full gap-8 mt-1') as self.rec_info_row:
+        with ui.row().classes('items-center justify-center w-full gap-8 px-4 py-1') as self.rec_info_row:
             with ui.column().classes('items-center gap-0 w-32'):
                 ui.label('Robot').classes('text-xs text-gray-400')
                 ui.label(self.config.get('robot_name', '—')).classes('text-sm font-mono text-center')
@@ -102,7 +101,7 @@ class LogboyGUI:
                 ui.label('Free').classes('text-xs text-gray-400')
                 self.free_label = ui.label('—').classes('text-sm font-mono text-center')
         # Topic monitor table
-        ui.separator().classes('my-4')
+        ui.separator().classes('my-2')
         columns = [
             {'name': 'name',         'label': 'Topic',    'field': 'name',         'align': 'left',  'sortable': True},
             {'name': 'expected_fps', 'label': 'Exp. FPS', 'field': 'expected_fps', 'align': 'right', 'sortable': True},
@@ -201,7 +200,7 @@ class LogboyGUI:
             self._update_countdown_label()
 
     def _update_countdown_label(self):
-        self.status_label.set_text(f'Starting in {self._countdown_remaining}s… (click ● to cancel)')
+        self.status_label.set_text(f'Starting in {self._countdown_remaining}s…')
 
     def _do_start_recording(self):
         self.controller.set_max_duration(self._get_max_duration_secs())
@@ -354,7 +353,7 @@ class LogboyGUI:
                     secs_left = int(free_bytes / rate)
                     h2, r2 = divmod(secs_left, 3600)
                     m2 = r2 // 60
-                    self.free_label.set_text(f'{self._fmt_bytes(free_bytes)} (~{h2}h {m2:02d}m)')
+                    self.free_label.set_text(f'{self._fmt_bytes(free_bytes)} ~{h2}h{m2:02d}m')
                 except OSError:
                     pass
 
