@@ -24,27 +24,6 @@ class LogboyGUI:
     # ── Build ────────────────────────────────────────────────────────────────
 
     def _build_ui(self):
-        # Settings dialog (not visible, defined first so inputs exist before top bar references them)
-        with ui.dialog() as self.settings_dialog, ui.card().classes('w-72'):
-            with ui.row().classes('items-center justify-between w-full mb-2'):
-                ui.label('Recording options').classes('text-base font-semibold')
-                ui.button(icon='close', on_click=self.settings_dialog.close).props('flat round dense')
-            with ui.column().classes('gap-4 w-full'):
-                with ui.row().classes('items-center gap-3'):
-                    ui.label('Max duration').classes('text-sm text-gray-400 w-28')
-                    self.max_input = ui.input(placeholder='HH:MM:SS') \
-                        .props('mask="##:##:##" fill-mask="0" dense outlined hide-bottom-space clearable') \
-                        .classes('w-32') \
-                        .on('change', self._update_settings_summary) \
-                        .on('clear', self._clear_max)
-                with ui.row().classes('items-center gap-3'):
-                    ui.label('Countdown').classes('text-sm text-gray-400 w-28')
-                    self.delay_input = ui.input(placeholder='HH:MM:SS') \
-                        .props('mask="##:##:##" fill-mask="0" dense outlined hide-bottom-space clearable') \
-                        .classes('w-32') \
-                        .on('change', self._update_settings_summary) \
-                        .on('clear', self._clear_delay)
-
         # Compact top bar — buttons are absolutely pinned to centre, nothing can move them
         with ui.element('div').classes('relative flex items-center w-full px-4 py-2 min-h-12'):
             # Buttons + status: absolutely centred, fixed total width so buttons never move
@@ -56,8 +35,6 @@ class LogboyGUI:
                 self.stop_btn.set_visibility(False)
                 self.pause_btn = ui.button(icon='pause', on_click=self.toggle_pause) \
                     .props('round flat color="grey" disable')
-                self.settings_btn = ui.button(icon='settings', on_click=self.settings_dialog.open) \
-                    .props('round flat color="grey-6"')
                 self.rec_indicator = ui.icon('fiber_manual_record', size='xs').classes('text-transparent ml-2')
                 self.status_label = ui.label('Ready').classes('text-sm w-36')
 
@@ -66,10 +43,29 @@ class LogboyGUI:
                 ui.image('/assets/logboy_logo.png').classes('w-7 h-7')
                 ui.label('logboy').classes('text-lg font-bold')
 
-            # Right: summary + clock + dark toggle
+            # Right: settings inputs + clock + dark toggle
             with ui.row().classes('items-center gap-2 ml-auto'):
-                self.settings_summary = ui.label('').classes('text-xs text-gray-500 font-mono')
-                self.clock_label = ui.label().classes('text-xs font-mono text-gray-400')
+                ui.label('Max').classes('text-xs text-gray-400')
+                self.max_input = ui.input(placeholder='——:——:——') \
+                    .props('mask="##:##:##" fill-mask="0" dense borderless hide-bottom-space') \
+                    .classes('w-[5.5rem] text-xs font-mono text-gray-400') \
+                    .on('blur', self._on_max_blur)
+                with self.max_input.add_slot('append'):
+                    self.max_clear_btn = ui.icon('close', size='xs') \
+                        .classes('cursor-pointer text-gray-400') \
+                        .on('click', self._clear_max)
+                    self.max_clear_btn.set_visibility(False)
+                ui.label('Delay').classes('text-xs text-gray-400 ml-4')
+                self.delay_input = ui.input(placeholder='——:——:——') \
+                    .props('mask="##:##:##" fill-mask="0" dense borderless hide-bottom-space') \
+                    .classes('w-[5.5rem] text-xs font-mono text-gray-400') \
+                    .on('blur', self._on_delay_blur)
+                with self.delay_input.add_slot('append'):
+                    self.delay_clear_btn = ui.icon('close', size='xs') \
+                        .classes('cursor-pointer text-gray-400') \
+                        .on('click', self._clear_delay)
+                    self.delay_clear_btn.set_visibility(False)
+                self.clock_label = ui.label().classes('text-xs font-mono text-gray-400 ml-2')
                 self.dark = ui.dark_mode(value=True)
                 self.dark_btn = ui.button(icon='dark_mode', on_click=self._toggle_dark).props('flat round dense')
 
@@ -78,7 +74,6 @@ class LogboyGUI:
         if cfg_max:
             h, m, s = self._secs_to_hms(cfg_max)
             self.max_input.value = f'{h:02d}:{m:02d}:{s:02d}'
-            self._update_settings_summary()
 
         # Recording info panel
         with ui.row().classes('items-center justify-center w-full gap-8 px-4 py-1') as self.rec_info_row:
@@ -176,7 +171,7 @@ class LogboyGUI:
             return
         delay = self._get_delay_secs()
         if delay > 0:
-            self._set_enabled(self.settings_btn, False)
+            self._set_enabled(self.max_input, False); self._set_enabled(self.delay_input, False)
             self._countdown_remaining = int(delay)
             self._update_countdown_label()
             self._countdown_timer = ui.timer(1.0, self._countdown_tick)
@@ -188,7 +183,7 @@ class LogboyGUI:
         self._countdown_timer = None
         self._countdown_remaining = 0
         self.status_label.set_text('Ready')
-        self._set_enabled(self.settings_btn, True)
+        self._set_enabled(self.max_input, True); self._set_enabled(self.delay_input, True)
 
     def _countdown_tick(self):
         self._countdown_remaining -= 1
@@ -208,14 +203,14 @@ class LogboyGUI:
             self.controller.start_recording()
         except ValueError as e:
             ui.notify(str(e), type='negative', position='top', timeout=5000)
-            self._set_enabled(self.settings_btn, True)
+            self._set_enabled(self.max_input, True); self._set_enabled(self.delay_input, True)
             return
         self.is_paused = False
         self.status_label.set_text('Recording')
         self.record_btn.set_visibility(False)
         self.stop_btn.set_visibility(True)
         self._set_enabled(self.pause_btn, True)
-        self._set_enabled(self.settings_btn, False)
+        self._set_enabled(self.max_input, False); self._set_enabled(self.delay_input, False)
         self.rec_indicator.classes('text-red-500', remove='text-transparent')
         self.blink_timer.activate()
         self.elapsed_timer.activate()
@@ -232,7 +227,7 @@ class LogboyGUI:
         self.record_btn.set_visibility(True)
         self._set_enabled(self.record_btn, True)
         self._set_enabled(self.pause_btn, False)
-        self._set_enabled(self.settings_btn, True)
+        self._set_enabled(self.max_input, True); self._set_enabled(self.delay_input, True)
         self.rec_indicator.props('name=fiber_manual_record')
         self.rec_indicator.classes('text-transparent', remove='text-red-500 text-orange-500')
 
@@ -286,7 +281,7 @@ class LogboyGUI:
             self.blink_pause_timer.deactivate()
             self.elapsed_timer.deactivate()
             self.pause_btn.props('icon=pause color=grey')
-            self._set_enabled(self.settings_btn, True)
+            self._set_enabled(self.max_input, True); self._set_enabled(self.delay_input, True)
             self.rec_indicator.props('name=fiber_manual_record')
             self.rec_indicator.classes('text-transparent', remove='text-red-500 text-orange-500')
         elif is_paused:
@@ -307,7 +302,7 @@ class LogboyGUI:
             self.blink_pause_timer.deactivate()
             self.rec_indicator.props('name=fiber_manual_record')
             self.pause_btn.props('icon=pause color=grey')
-            self._set_enabled(self.settings_btn, False)
+            self._set_enabled(self.max_input, False); self._set_enabled(self.delay_input, False)
             self.rec_indicator.classes('text-red-500', remove='text-transparent text-orange-500')
             self.blink_timer.activate()
             self.elapsed_timer.activate()
@@ -403,21 +398,23 @@ class LogboyGUI:
 
     # ── Helpers ──────────────────────────────────────────────────────────────
 
+    def _on_max_blur(self, *_):
+        if not self._get_max_duration_secs():
+            self.max_input.value = ''
+        self.max_clear_btn.set_visibility(bool(self._get_max_duration_secs()))
+
+    def _on_delay_blur(self, *_):
+        if not self._get_delay_secs():
+            self.delay_input.value = ''
+        self.delay_clear_btn.set_visibility(bool(self._get_delay_secs()))
+
     def _clear_max(self, *_):
         self.max_input.value = ''
-        self._update_settings_summary()
+        self.max_clear_btn.set_visibility(False)
 
     def _clear_delay(self, *_):
         self.delay_input.value = ''
-        self._update_settings_summary()
-
-    def _update_settings_summary(self, *_):
-        parts = []
-        if self._get_max_duration_secs():
-            parts.append(f'Max {self.max_input.value}')
-        if self._get_delay_secs():
-            parts.append(f'Delay {self.delay_input.value}')
-        self.settings_summary.set_text('  ·  '.join(parts))
+        self.delay_clear_btn.set_visibility(False)
 
     def _get_max_duration_secs(self) -> float | None:
         total = self._parse_hms(self.max_input.value)
