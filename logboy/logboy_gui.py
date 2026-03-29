@@ -65,6 +65,23 @@ class LogboyGUI:
                         .classes('cursor-pointer text-gray-400') \
                         .on('click', self._clear_delay)
                     self.delay_clear_btn.set_visibility(False)
+                ui.label('Split').classes('text-xs text-gray-400 ml-4')
+                self.split_select = ui.select(
+                    {'time': 'Time', 'size': 'Size'},
+                    value=None, on_change=self._on_split_change,
+                ).props('dense borderless hide-bottom-space options-dense label="—"').classes('text-xs font-mono text-gray-400 w-16')
+                self.split_time_input = ui.input(placeholder='——:——:——') \
+                    .props('mask="##:##:##" fill-mask="0" dense borderless hide-bottom-space') \
+                    .classes('w-[5.5rem] text-xs font-mono text-gray-400')
+                self.split_time_input.set_visibility(False)
+                self.split_size_input = ui.input(placeholder='—') \
+                    .props('dense borderless hide-bottom-space suffix="MB"') \
+                    .classes('w-14 text-xs font-mono text-gray-400')
+                self.split_size_input.set_visibility(False)
+                self.split_clear_btn = ui.icon('close', size='xs') \
+                    .classes('cursor-pointer text-gray-400') \
+                    .on('click', self._clear_split)
+                self.split_clear_btn.set_visibility(False)
                 self.clock_label = ui.label().classes('text-xs font-mono text-gray-400 ml-2')
                 self.dark = ui.dark_mode(value=True)
                 self.dark_btn = ui.button(icon='dark_mode', on_click=self._toggle_dark).props('flat round dense')
@@ -171,7 +188,7 @@ class LogboyGUI:
             return
         delay = self._get_delay_secs()
         if delay > 0:
-            self._set_enabled(self.max_input, False); self._set_enabled(self.delay_input, False)
+            self._set_enabled(self.max_input, False); self._set_enabled(self.delay_input, False); self._set_enabled(self.split_select, False); self._set_enabled(self.split_time_input, False); self._set_enabled(self.split_size_input, False)
             self._countdown_remaining = int(delay)
             self._update_countdown_label()
             self._countdown_timer = ui.timer(1.0, self._countdown_tick)
@@ -183,7 +200,7 @@ class LogboyGUI:
         self._countdown_timer = None
         self._countdown_remaining = 0
         self.status_label.set_text('Ready')
-        self._set_enabled(self.max_input, True); self._set_enabled(self.delay_input, True)
+        self._set_enabled(self.max_input, True); self._set_enabled(self.delay_input, True); self._set_enabled(self.split_select, True); self._set_enabled(self.split_time_input, True); self._set_enabled(self.split_size_input, True)
 
     def _countdown_tick(self):
         self._countdown_remaining -= 1
@@ -203,14 +220,14 @@ class LogboyGUI:
             self.controller.start_recording()
         except ValueError as e:
             ui.notify(str(e), type='negative', position='top', timeout=5000)
-            self._set_enabled(self.max_input, True); self._set_enabled(self.delay_input, True)
+            self._set_enabled(self.max_input, True); self._set_enabled(self.delay_input, True); self._set_enabled(self.split_select, True); self._set_enabled(self.split_time_input, True); self._set_enabled(self.split_size_input, True)
             return
         self.is_paused = False
         self.status_label.set_text('Recording')
         self.record_btn.set_visibility(False)
         self.stop_btn.set_visibility(True)
         self._set_enabled(self.pause_btn, True)
-        self._set_enabled(self.max_input, False); self._set_enabled(self.delay_input, False)
+        self._set_enabled(self.max_input, False); self._set_enabled(self.delay_input, False); self._set_enabled(self.split_select, False); self._set_enabled(self.split_time_input, False); self._set_enabled(self.split_size_input, False)
         self.rec_indicator.classes('text-red-500', remove='text-transparent')
         self.blink_timer.activate()
         self.elapsed_timer.activate()
@@ -227,7 +244,7 @@ class LogboyGUI:
         self.record_btn.set_visibility(True)
         self._set_enabled(self.record_btn, True)
         self._set_enabled(self.pause_btn, False)
-        self._set_enabled(self.max_input, True); self._set_enabled(self.delay_input, True)
+        self._set_enabled(self.max_input, True); self._set_enabled(self.delay_input, True); self._set_enabled(self.split_select, True); self._set_enabled(self.split_time_input, True); self._set_enabled(self.split_size_input, True)
         self.rec_indicator.props('name=fiber_manual_record')
         self.rec_indicator.classes('text-transparent', remove='text-red-500 text-orange-500')
 
@@ -281,7 +298,7 @@ class LogboyGUI:
             self.blink_pause_timer.deactivate()
             self.elapsed_timer.deactivate()
             self.pause_btn.props('icon=pause color=grey')
-            self._set_enabled(self.max_input, True); self._set_enabled(self.delay_input, True)
+            self._set_enabled(self.max_input, True); self._set_enabled(self.delay_input, True); self._set_enabled(self.split_select, True); self._set_enabled(self.split_time_input, True); self._set_enabled(self.split_size_input, True)
             self.rec_indicator.props('name=fiber_manual_record')
             self.rec_indicator.classes('text-transparent', remove='text-red-500 text-orange-500')
         elif is_paused:
@@ -302,7 +319,7 @@ class LogboyGUI:
             self.blink_pause_timer.deactivate()
             self.rec_indicator.props('name=fiber_manual_record')
             self.pause_btn.props('icon=pause color=grey')
-            self._set_enabled(self.max_input, False); self._set_enabled(self.delay_input, False)
+            self._set_enabled(self.max_input, False); self._set_enabled(self.delay_input, False); self._set_enabled(self.split_select, False); self._set_enabled(self.split_time_input, False); self._set_enabled(self.split_size_input, False)
             self.rec_indicator.classes('text-red-500', remove='text-transparent text-orange-500')
             self.blink_timer.activate()
             self.elapsed_timer.activate()
@@ -397,6 +414,44 @@ class LogboyGUI:
         }
 
     # ── Helpers ──────────────────────────────────────────────────────────────
+
+    def _on_split_change(self, *_):
+        mode = self.split_select.value
+        self.split_time_input.set_visibility(mode == 'time')
+        self.split_size_input.set_visibility(mode == 'size')
+        self.split_clear_btn.set_visibility(mode is not None)
+        if mode is None:
+            self.split_time_input.value = ''
+            self.split_size_input.value = ''
+            self.split_select.props('label="—"')
+        else:
+            self.split_select.props(remove='label')
+            ui.notify('Split recording is not yet supported — backend coming soon.', type='warning', position='top', timeout=3000)
+
+    def _clear_split(self, *_):
+        self.split_select.value = None
+        self.split_time_input.value = ''
+        self.split_size_input.value = ''
+        self.split_time_input.set_visibility(False)
+        self.split_size_input.set_visibility(False)
+        self.split_clear_btn.set_visibility(False)
+        self.split_select.props('label="—"')
+
+    def get_split_config(self) -> dict:
+        """Returns {'mode': 'off'|'time'|'size', 'value': seconds|bytes|None}"""
+        mode = self.split_select.value
+        if mode is None:
+            return {'mode': 'off', 'value': None}
+        if mode == 'time':
+            secs = self._parse_hms(self.split_time_input.value)
+            return {'mode': 'time', 'value': secs or None}
+        if mode == 'size':
+            try:
+                mb = float(self.split_size_input.value)
+                return {'mode': 'size', 'value': int(mb * 1024 * 1024) if mb else None}
+            except (ValueError, TypeError):
+                return {'mode': 'size', 'value': None}
+        return {'mode': 'off', 'value': None}
 
     def _on_max_blur(self, *_):
         if not self._get_max_duration_secs():
