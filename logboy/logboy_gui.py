@@ -1,11 +1,29 @@
 from nicegui import ui, app
 import os
 import shutil
+import subprocess
 import yaml
 import argparse
 from datetime import datetime
 from logboy.logboy_controller import LogboyController
 from logboy.logboy_stats import TopicSnapshot
+
+
+def _git_version(start_path: str) -> str:
+    try:
+        parts = os.path.abspath(start_path).split(os.sep)
+        if 'install' in parts:
+            ws_root = os.sep.join(parts[:parts.index('install')])
+            repo_path = os.path.join(ws_root, 'src', 'logboy')
+        else:
+            repo_path = os.path.dirname(os.path.abspath(start_path))
+        return subprocess.check_output(
+            ['git', 'describe', '--tags', '--always', '--dirty'],
+            cwd=repo_path,
+            stderr=subprocess.DEVNULL,
+        ).decode().strip()
+    except Exception:
+        return 'unknown'
 
 
 class LogboyGUI:
@@ -536,6 +554,7 @@ def main():
 
     controller = LogboyController()
     controller.configure_recorder(config)   # ← einmalig hier, nicht in start_recording
+    version = _git_version(args.config)
 
     ament_prefix_path = os.getenv('AMENT_PREFIX_PATH', '')
     assets_dir = os.path.join(ament_prefix_path.split(os.pathsep)[0], 'share', 'logboy', 'assets')
@@ -588,6 +607,11 @@ def main():
         </script>
         ''')
         LogboyGUI(controller, config)
+        with ui.element('div').classes('fixed bottom-0 left-0 right-0 flex items-center justify-center gap-2 py-1'):
+            ui.link('logboy', 'https://github.com/yannikmotzet/logboy', new_tab=True) \
+                .classes('text-xs text-gray-600 hover:text-gray-400 no-underline')
+            ui.label('·').classes('text-xs text-gray-600')
+            ui.label(version).classes('text-xs font-mono text-gray-600 select-all')
 
     ui.run(title='logboy', favicon=f'{assets_dir}/logboy_logo.png', reload=False)
 
