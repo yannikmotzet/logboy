@@ -113,6 +113,16 @@ class LogboyGUI:
         ]
         self.table = ui.table(columns=columns, rows=[], row_key='name').classes('w-full')
 
+        self.table.add_slot('body-cell-name', '''
+            <q-td :props="props">
+                <span :style="{ color:
+                    props.row.expected_fps <= 0                                                          ? 'inherit' :
+                    !props.row.active || props.row.age > 5                                               ? '#ef4444' :
+                    props.row.age > 1/props.row.expected_fps*3                                           ? '#eab308' : 'inherit' }">
+                    {{ props.value }}
+                </span>
+            </q-td>
+        ''')
         self.table.add_slot('body-cell-expected_fps', '''
             <q-td :props="props">
                 {{ props.value > 0 ? props.value.toFixed(1) : '—' }}
@@ -130,8 +140,14 @@ class LogboyGUI:
         ''')
         self.table.add_slot('body-cell-drops', '''
             <q-td :props="props">
-                <span :style="{ color: props.value > 0 ? '#ef4444' : '#22c55e' }">
+                <span :style="{ color: (() => {
+                    const rate = props.row.total_msgs > 0 ? props.value / props.row.total_msgs : 0;
+                    return rate > 0.05 ? '#ef4444' : rate > 0 ? '#eab308' : '#22c55e';
+                })() }">
                     {{ props.value }}
+                    <span v-if="props.row.total_msgs > 0" style="opacity:0.6; font-size:0.85em">
+                        ({{ (props.value / props.row.total_msgs * 100).toFixed(1) }}%)
+                    </span>
                 </span>
             </q-td>
         ''')
