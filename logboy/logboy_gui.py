@@ -1,5 +1,6 @@
 from nicegui import ui, app
 import os
+import shutil
 import yaml
 import argparse
 from datetime import datetime
@@ -27,7 +28,8 @@ class LogboyGUI:
             with ui.row().classes('items-center gap-3'):
                 ui.image('/assets/logboy_logo.png').classes('w-12 h-12')
                 ui.label('logboy').classes('text-3xl font-bold')
-            with ui.row().classes('flex-1 justify-end'):
+            with ui.row().classes('flex-1 justify-end items-center gap-3'):
+                self.clock_label = ui.label().classes('text-sm font-mono text-gray-400')
                 self.dark = ui.dark_mode(value=True)
                 self.dark_btn = ui.button(icon='dark_mode', on_click=self._toggle_dark).props('flat round')
 
@@ -47,18 +49,24 @@ class LogboyGUI:
 
         # Recording info panel
         with ui.row().classes('items-center justify-center w-full gap-8 mt-1') as self.rec_info_row:
-            with ui.column().classes('items-center gap-0 w-64'):
-                ui.label('Name').classes('text-xs text-gray-400')
-                self.rec_name_label = ui.label('—').classes('text-sm font-mono text-center')
+            with ui.column().classes('items-center gap-0 w-32'):
+                ui.label('Robot').classes('text-xs text-gray-400')
+                ui.label(self.config.get('robot_name', '—')).classes('text-sm font-mono text-center')
             with ui.column().classes('items-center gap-0 w-48'):
-                ui.label('Location').classes('text-xs text-gray-400')
+                ui.label('Storage').classes('text-xs text-gray-400')
                 self.rec_path_label = ui.label(os.path.expanduser(self.config.get('storage_path', '—'))).classes('text-sm font-mono text-center')
+            with ui.column().classes('items-center gap-0 w-64'):
+                ui.label('Recording').classes('text-xs text-gray-400')
+                self.rec_name_label = ui.label('—').classes('text-sm font-mono text-center')
             with ui.column().classes('items-center gap-0 w-24'):
                 ui.label('Elapsed').classes('text-xs text-gray-400')
                 self.elapsed_label = ui.label('—').classes('text-sm font-mono text-center')
             with ui.column().classes('items-center gap-0 w-24'):
                 ui.label('Size').classes('text-xs text-gray-400')
                 self.size_label = ui.label('—').classes('text-sm font-mono text-center')
+            with ui.column().classes('items-center gap-0 w-36'):
+                ui.label('Free').classes('text-xs text-gray-400')
+                self.free_label = ui.label('—').classes('text-sm font-mono text-center')
         # Topic monitor table
         ui.separator().classes('my-4')
         columns = [
@@ -164,6 +172,8 @@ class LogboyGUI:
         self.table.update()
         self._sync_state()
         self._refresh_rec_info()
+        self._refresh_free_space()
+        self.clock_label.set_text(datetime.now().strftime('%H:%M:%S'))
 
     def _sync_state(self):
         """Sync button/status state from the controller (handles multi-tab and page reload)."""
@@ -216,17 +226,43 @@ class LogboyGUI:
         h, rem = divmod(int(elapsed), 3600)
         m, s = divmod(rem, 60)
         self.elapsed_label.set_text(f'{h:02d}:{m:02d}:{s:02d}')
-        # name and path
         if bag_path:
             self.rec_name_label.set_text(os.path.basename(bag_path))
             self.rec_path_label.set_text(os.path.dirname(bag_path))
-            self.size_label.set_text(self._bag_size(bag_path))
+            size_bytes = self._bag_size_bytes(bag_path)
+            self.size_label.set_text(self._fmt_bytes(size_bytes))
+            # update time-left estimate in free label
+            if elapsed > 5 and size_bytes > 0:
+                storage_path = self.config.get('storage_path', '')
+                try:
+                    free_bytes = shutil.disk_usage(os.path.expanduser(storage_path)).free
+                    rate = size_bytes / elapsed  # bytes/s
+                    secs_left = int(free_bytes / rate)
+                    h2, r2 = divmod(secs_left, 3600)
+                    m2 = r2 // 60
+                    self.free_label.set_text(f'{self._fmt_bytes(free_bytes)} (~{h2}h {m2:02d}m)')
+                except OSError:
+                    pass
+
+    def _refresh_free_space(self):
+        """Update free space label when not recording (no rate estimate available)."""
+        if self.controller.get_elapsed() is not None:
+            return  # handled by _refresh_rec_info
+        storage_path = self.config.get('storage_path', '')
+        try:
+            free_bytes = shutil.disk_usage(os.path.expanduser(storage_path)).free
+            self.free_label.set_text(self._fmt_bytes(free_bytes))
+        except OSError:
+            self.free_label.set_text('—')
 
     @staticmethod
-    def _bag_size(bag_path: str) -> str:
+    def _bag_size_bytes(bag_path: str) -> int:
         if not os.path.isdir(bag_path):
-            return '—'
-        total = sum(e.stat().st_size for e in os.scandir(bag_path) if e.is_file())
+            return 0
+        return sum(e.stat().st_size for e in os.scandir(bag_path) if e.is_file())
+
+    @staticmethod
+    def _fmt_bytes(total: float) -> str:
         for unit in ('B', 'KB', 'MB', 'GB'):
             if total < 1024:
                 return f'{total:.1f} {unit}'
