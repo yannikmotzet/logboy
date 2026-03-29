@@ -327,6 +327,50 @@ def main():
 
     @ui.page('/')
     def index():
+        ui.add_head_html('''
+        <style>
+        #logboy-disconnected {
+            display: none;
+            position: fixed;
+            bottom: 2rem;
+            left: 50%;
+            transform: translateX(-50%);
+            background: #1f2937;
+            border: 1px solid #f87171;
+            border-radius: 0.75rem;
+            padding: 0.75rem 1.5rem;
+            z-index: 99999;
+            flex-direction: row;
+            align-items: center;
+            gap: 0.75rem;
+            box-shadow: 0 4px 24px rgba(0,0,0,0.6);
+        }
+        #logboy-disconnected.visible { display: flex; }
+        #logboy-disconnected .lb-icon  { font-size: 1.5rem; }
+        #logboy-disconnected .lb-title { font-size: 1.1rem; font-weight: bold; color: #f87171; font-family: monospace; }
+        #logboy-disconnected .lb-sub   { font-size: 0.85rem; color: #9ca3af; font-family: monospace; }
+        </style>
+        <div id="logboy-disconnected">
+            <div class="lb-icon">⚠</div>
+            <div>
+                <div class="lb-title">Connection Lost</div>
+                <div class="lb-sub">The logboy server is not running.</div>
+            </div>
+        </div>
+        <script>
+        (function() {
+            const overlay = document.getElementById("logboy-disconnected");
+            setInterval(async () => {
+                try {
+                    await fetch("/", { method: "HEAD", cache: "no-store" });
+                    overlay.classList.remove("visible");
+                } catch {
+                    overlay.classList.add("visible");
+                }
+            }, 2000);
+        })();
+        </script>
+        ''')
         LogboyGUI(controller, config)
 
     ui.run(title='logboy', favicon=f'{assets_dir}/logboy_logo.png', reload=False)
