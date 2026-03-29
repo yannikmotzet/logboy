@@ -189,7 +189,12 @@ class LogboyGUI:
 
     def _do_start_recording(self):
         self.controller.set_max_duration(self._get_max_duration_secs())
-        self.controller.start_recording()
+        try:
+            self.controller.start_recording()
+        except ValueError as e:
+            ui.notify(str(e), type='negative', position='top', timeout=5000)
+            self._set_enabled(self.settings_btn, True)
+            return
         self.is_paused = False
         self.status_label.set_text('Recording')
         self.record_btn.set_visibility(False)
@@ -341,9 +346,16 @@ class LogboyGUI:
         """Update free space label when not recording (no rate estimate available)."""
         if self.controller.get_elapsed() is not None:
             return  # handled by _refresh_rec_info
-        storage_path = self.config.get('storage_path', '')
+        storage_path = os.path.expanduser(self.config.get('storage_path', ''))
+        if not os.path.isdir(storage_path):
+            self.rec_path_label.classes('text-red-500', remove='text-gray-400')
+            self.free_label.set_text('—')
+            self.free_label.classes('text-gray-400', remove='text-red-500')
+            return
+        self.rec_path_label.classes('text-gray-400', remove='text-red-500')
+        self.free_label.classes('text-gray-400', remove='text-red-500')
         try:
-            free_bytes = shutil.disk_usage(os.path.expanduser(storage_path)).free
+            free_bytes = shutil.disk_usage(storage_path).free
             self.free_label.set_text(self._fmt_bytes(free_bytes))
         except OSError:
             self.free_label.set_text('—')
