@@ -54,8 +54,7 @@ def fmt_first_seen(ts: float | None) -> str:
 
 # ── Monitor Render ────────────────────────────────────────────────────────────
 
-def build_table(snapshots: list[TopicSnapshot], is_paused: bool, start_time: float, is_recording: bool = True, bag_path: str | None = None) -> Table:
-    elapsed = time.monotonic() - start_time
+def build_table(snapshots: list[TopicSnapshot], is_paused: bool, elapsed: float, is_recording: bool = True, bag_path: str | None = None) -> Table:
     h, rem = divmod(int(elapsed), 3600)
     m, s = divmod(rem, 60)
 
@@ -119,12 +118,17 @@ def build_table(snapshots: list[TopicSnapshot], is_paused: bool, start_time: flo
 def monitor_loop(controller: LogboyController,
                  get_paused,
                  stop_event: threading.Event,
-                 start_time: float,
+                 get_elapsed,
                  live: Live,
                  refresh: float = 1.0,
                  is_recording: bool = True):
     while not stop_event.is_set():
-        live.update(build_table(controller.get_stats(), get_paused(), start_time, is_recording, controller.get_bag_path()))
+        if is_recording:
+            controller.check_max_duration()
+            if controller.get_bag_path() is None and not stop_event.is_set():
+                stop_event.set()
+                break
+        live.update(build_table(controller.get_stats(), get_paused(), get_elapsed(), is_recording, controller.get_bag_path()))
         time.sleep(refresh)
 
 
@@ -196,7 +200,6 @@ def record(
 
     is_paused = False
     stop_event = threading.Event()
-    start_time = time.monotonic()
 
     # Save terminal state before entering raw mode
     stdin_fd = sys.stdin.fileno()
@@ -211,11 +214,11 @@ def record(
                 else:
                     controller.pause_recording()
                 is_paused = not is_paused
-                live.update(build_table(controller.get_stats(), is_paused, start_time, True, controller.get_bag_path()))
+                live.update(build_table(controller.get_stats(), is_paused, controller.get_elapsed() or 0.0, True, controller.get_bag_path()))
 
             monitor_thread = threading.Thread(
                 target=monitor_loop,
-                args=(controller, lambda: is_paused, stop_event, start_time, live, refresh),
+                args=(controller, lambda: is_paused, stop_event, lambda: controller.get_elapsed() or 0.0, live, refresh),
                 daemon=True,
             )
             key_thread = threading.Thread(
@@ -235,6 +238,7 @@ def record(
                 stop_event.set()
                 final_bag_path = controller.get_bag_path()
                 final_stats = controller.get_stats()
+                final_elapsed = controller.get_elapsed() or 0.0
                 controller.stop_recording()
                 controller.shutdown()
     finally:
@@ -242,7 +246,7 @@ def record(
         os.dup2(saved_stderr_fd, 2)
         os.close(saved_stderr_fd)
 
-    console.print(build_table(final_stats, False, start_time, True, final_bag_path))
+    console.print(build_table(final_stats, False, final_elapsed, True, final_bag_path))
 
 
 @app.command()
@@ -276,7 +280,7 @@ def monitor(
         with Live(console=console, screen=True, refresh_per_second=4) as live:
             monitor_thread = threading.Thread(
                 target=monitor_loop,
-                args=(controller, lambda: False, stop_event, start_time, live, refresh, False),
+                args=(controller, lambda: False, stop_event, lambda: time.monotonic() - start_time, live, refresh, False),
                 daemon=True,
             )
             monitor_thread.start()
@@ -288,13 +292,14 @@ def monitor(
             finally:
                 stop_event.set()
                 final_stats = controller.get_stats()
+                final_elapsed = time.monotonic() - start_time
                 controller.shutdown()
     finally:
         termios.tcsetattr(stdin_fd, termios.TCSADRAIN, old_term_settings)
         os.dup2(saved_stderr_fd, 2)
         os.close(saved_stderr_fd)
 
-    console.print(build_table(final_stats, False, start_time, False))
+    console.print(build_table(final_stats, False, final_elapsed, False))
 
 
 def main():
