@@ -148,9 +148,10 @@ class LogboyGUI:
         ''')
 
         # Timers
-        self.blink_timer      = ui.timer(1.0,    self._blink_record, active=False)
-        self.blink_pause_timer = ui.timer(0.25,  self._blink_pause,  active=False)
-        self.monitor_timer    = ui.timer(1.0,    self._refresh_table, active=True)
+        self.blink_timer       = ui.timer(1.0,   self._blink_record,   active=False)
+        self.blink_pause_timer = ui.timer(0.25,  self._blink_pause,    active=False)
+        self.elapsed_timer     = ui.timer(0.1,   self._refresh_elapsed, active=False)
+        self.monitor_timer     = ui.timer(1.0,   self._refresh_table,  active=True)
 
     # ── Transport controls ───────────────────────────────────────────────────
 
@@ -197,6 +198,7 @@ class LogboyGUI:
         self._set_enabled(self.settings_btn, False)
         self.rec_indicator.classes('text-red-500', remove='text-transparent')
         self.blink_timer.activate()
+        self.elapsed_timer.activate()
 
     def stop_recording(self):
         self.controller.stop_recording()
@@ -204,6 +206,7 @@ class LogboyGUI:
         self.status_label.set_text('Stopped')
         self.blink_timer.deactivate()
         self.blink_pause_timer.deactivate()
+        self.elapsed_timer.deactivate()
         self.pause_btn.props('icon=pause color=grey')
         self.stop_btn.set_visibility(False)
         self.record_btn.set_visibility(True)
@@ -261,6 +264,7 @@ class LogboyGUI:
             self._set_enabled(self.pause_btn, False)
             self.blink_timer.deactivate()
             self.blink_pause_timer.deactivate()
+            self.elapsed_timer.deactivate()
             self.pause_btn.props('icon=pause color=grey')
             self._set_enabled(self.settings_btn, True)
             self.rec_indicator.props('name=fiber_manual_record')
@@ -286,10 +290,20 @@ class LogboyGUI:
             self._set_enabled(self.settings_btn, False)
             self.rec_indicator.classes('text-red-500', remove='text-transparent text-orange-500')
             self.blink_timer.activate()
+            self.elapsed_timer.activate()
 
         self._ui_recording = is_recording
         self._ui_paused    = is_paused
         self.is_paused     = is_paused
+
+    def _refresh_elapsed(self):
+        elapsed = self.controller.get_elapsed()
+        if elapsed is None:
+            return
+        h, rem = divmod(int(elapsed), 3600)
+        m, s = divmod(rem, 60)
+        tenths = int(elapsed * 10) % 10
+        self.elapsed_label.set_text(f'{h:02d}:{m:02d}:{s:02d}.{tenths}')
 
     def _refresh_rec_info(self):
         elapsed = self.controller.get_elapsed()
@@ -298,9 +312,6 @@ class LogboyGUI:
 
         max_dur = self.controller.get_max_duration()
         bag_path = self.controller.get_bag_path()
-        h, rem = divmod(int(elapsed), 3600)
-        m, s = divmod(rem, 60)
-        self.elapsed_label.set_text(f'{h:02d}:{m:02d}:{s:02d}')
         if max_dur and not self.is_paused:
             remaining = max(0.0, max_dur - elapsed)
             rh, rrem = divmod(int(remaining), 3600)
