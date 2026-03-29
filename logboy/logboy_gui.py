@@ -21,17 +21,22 @@ class LogboyGUI:
     # ── Build ────────────────────────────────────────────────────────────────
 
     def _build_ui(self):
-        # Header with logo
-        with ui.row().classes('items-center justify-center w-full mt-4 gap-3'):
-            ui.image('/assets/logboy_logo.png').classes('w-12 h-12')
-            ui.label('logboy').classes('text-3xl font-bold')
+        # Header with logo and dark mode toggle
+        with ui.row().classes('items-center w-full mt-4 px-4'):
+            ui.element('div').classes('flex-1')
+            with ui.row().classes('items-center gap-3'):
+                ui.image('/assets/logboy_logo.png').classes('w-12 h-12')
+                ui.label('logboy').classes('text-3xl font-bold')
+            with ui.row().classes('flex-1 justify-end'):
+                self.dark = ui.dark_mode(value=True)
+                self.dark_btn = ui.button(icon='dark_mode', on_click=self._toggle_dark).props('flat round')
 
         # Transport controls
         with ui.row().classes('items-center justify-center w-full mt-4 gap-2'):
             self.record_btn = ui.button(icon='fiber_manual_record', on_click=self.start_recording) \
                 .props('round flat size="xl" color="red"')
             self.stop_btn = ui.button(icon='stop', on_click=self.stop_recording) \
-                .props('round flat size="xl" color="dark"')
+                .props('round flat size="xl" color="grey-6"')
             self.stop_btn.set_visibility(False)
             self.pause_btn = ui.button(icon='pause', on_click=self.toggle_pause) \
                 .props('round flat size="xl" color="grey" disable')
@@ -138,7 +143,7 @@ class LogboyGUI:
             self.blink_timer.deactivate()
             self.rec_indicator.classes('text-transparent', remove='text-red-500 text-orange-500')
             self.rec_indicator.props('name=pause')
-            self.pause_btn.props('icon=play_arrow color=grey-7')
+            self.pause_btn.props('icon=play_arrow color=grey-6')
             self.blink_pause_timer.activate()
         else:
             self.controller.resume_recording()
@@ -185,7 +190,7 @@ class LogboyGUI:
             self._set_enabled(self.pause_btn, True)
             self.blink_timer.deactivate()
             self.rec_indicator.props('name=pause')
-            self.pause_btn.props('icon=play_arrow color=grey-7')
+            self.pause_btn.props('icon=play_arrow color=grey-6')
             self.rec_indicator.classes('text-transparent', remove='text-red-500')
             self.blink_pause_timer.activate()
         else:
@@ -241,6 +246,10 @@ class LogboyGUI:
         }
 
     # ── Helpers ──────────────────────────────────────────────────────────────
+
+    def _toggle_dark(self):
+        self.dark.toggle()
+        self.dark_btn.props('icon=light_mode' if self.dark.value else 'icon=dark_mode')
 
     def _set_enabled(self, element, enabled: bool):
         if enabled:
