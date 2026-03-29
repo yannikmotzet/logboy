@@ -1,6 +1,5 @@
-from nicegui import ui
+from nicegui import ui, app
 import os
-import time
 import yaml
 import argparse
 from datetime import datetime
@@ -14,12 +13,6 @@ class LogboyGUI:
         self.config = config
         self.is_paused = False
 
-        ament_prefix_path = os.getenv('AMENT_PREFIX_PATH', '')
-        paths = ament_prefix_path.split(os.pathsep)
-        if not paths or not paths[0]:
-            raise ValueError("AMENT_PREFIX_PATH is not set or invalid.")
-        self.assets_dir = os.path.join(paths[0], 'share', 'logboy', 'assets')
-
         self._blink_state = False
         self._ui_recording = False   # last known UI state
         self._ui_paused    = False
@@ -28,18 +21,24 @@ class LogboyGUI:
     # ── Build ────────────────────────────────────────────────────────────────
 
     def _build_ui(self):
+        # Header with logo
+        with ui.row().classes('items-center justify-center w-full mt-4 gap-3'):
+            ui.image('/assets/logboy_logo.png').classes('w-12 h-12')
+            ui.label('logboy').classes('text-3xl font-bold')
+
         # Transport controls
-        with ui.row().classes('items-center justify-center w-full mt-4 gap-4'):
-            self.record_btn = ui.image(self._asset('rec-button.png')).classes('w-24 h-24 cursor-pointer')
-            self.record_btn.on('click', self.start_recording)
+        with ui.row().classes('items-center justify-center w-full mt-4 gap-2'):
+            self.record_btn = ui.button(icon='fiber_manual_record', on_click=self.start_recording) \
+                .props('round flat size="xl" color="red"')
+            self.stop_btn = ui.button(icon='stop', on_click=self.stop_recording) \
+                .props('round flat size="xl" color="dark"')
+            self.stop_btn.set_visibility(False)
+            self.pause_btn = ui.button(icon='pause', on_click=self.toggle_pause) \
+                .props('round flat size="xl" color="grey" disable')
 
-            self.pause_btn = ui.image(self._asset('pause.png')).classes('w-24 h-24 cursor-pointer opacity-30 pointer-events-none')
-            self.pause_btn.on('click', self.toggle_pause)
-
-            self.stop_btn = ui.image(self._asset('stop-button.png')).classes('w-24 h-24 cursor-pointer opacity-30 pointer-events-none')
-            self.stop_btn.on('click', self.stop_recording)
-
-        self.status_label = ui.label('Status: Ready').classes('text-lg text-center w-full mt-2')
+        with ui.row().classes('items-center justify-center w-full mt-2 gap-1'):
+            self.rec_indicator = ui.icon('fiber_manual_record', size='sm').classes('text-transparent')
+            self.status_label = ui.label('Ready').classes('text-lg')
 
         # Recording info panel
         with ui.row().classes('items-center justify-center w-full gap-8 mt-1') as self.rec_info_row:
@@ -111,38 +110,45 @@ class LogboyGUI:
     def start_recording(self):
         self.controller.start_recording()
         self.is_paused = False
-        self.status_label.set_text('Status: Recording')
-        self._set_enabled(self.record_btn, False)
-        self._set_enabled(self.stop_btn,   True)
-        self._set_enabled(self.pause_btn,  True)
+        self.status_label.set_text('Recording')
+        self.record_btn.set_visibility(False)
+        self.stop_btn.set_visibility(True)
+        self._set_enabled(self.pause_btn, True)
+        self.rec_indicator.classes('text-red-500', remove='text-transparent')
         self.blink_timer.activate()
 
     def stop_recording(self):
         self.controller.stop_recording()
         self.is_paused = False
-        self.status_label.set_text('Status: Stopped')
+        self.status_label.set_text('Stopped')
         self.blink_timer.deactivate()
         self.blink_pause_timer.deactivate()
-        self.record_btn.set_source(self._asset('rec-button.png'))
-        self.pause_btn.set_source(self._asset('pause.png'))
-        self._set_enabled(self.record_btn, True)
-        self._set_enabled(self.stop_btn,   False)
-        self._set_enabled(self.pause_btn,  False)
+        self.pause_btn.props('icon=pause color=grey')
+        self.stop_btn.set_visibility(False)
+        self.record_btn.set_visibility(True)
+        self._set_enabled(self.pause_btn, False)
+        self.rec_indicator.props('name=fiber_manual_record')
+        self.rec_indicator.classes('text-transparent', remove='text-red-500 text-orange-500')
 
     def toggle_pause(self):
         if not self.is_paused:
             self.controller.pause_recording()
             self.is_paused = True
-            self.status_label.set_text('Status: Paused')
+            self.status_label.set_text('Paused')
             self.blink_timer.deactivate()
-            self.record_btn.set_source(self._asset('rec-button.png'))
+            self.rec_indicator.classes('text-transparent', remove='text-red-500 text-orange-500')
+            self.rec_indicator.props('name=pause')
+            self.pause_btn.props('icon=play_arrow color=grey-7')
             self.blink_pause_timer.activate()
         else:
             self.controller.resume_recording()
             self.is_paused = False
-            self.status_label.set_text('Status: Recording')
+            self.status_label.set_text('Recording')
             self.blink_pause_timer.deactivate()
-            self.pause_btn.set_source(self._asset('pause.png'))
+            self.rec_indicator.classes('text-transparent', remove='text-orange-500')
+            self.rec_indicator.props('name=fiber_manual_record')
+            self.pause_btn.props('icon=pause color=grey')
+            self.rec_indicator.classes('text-red-500', remove='text-transparent')
             self.blink_timer.activate()
 
     # ── Monitor ──────────────────────────────────────────────────────────────
@@ -163,29 +169,34 @@ class LogboyGUI:
             return  # nothing changed
 
         if not is_recording:
-            self.status_label.set_text('Status: Stopped' if self._ui_recording else 'Status: Ready')
-            self._set_enabled(self.record_btn, True)
-            self._set_enabled(self.stop_btn,   False)
-            self._set_enabled(self.pause_btn,  False)
+            self.status_label.set_text('Stopped' if self._ui_recording else 'Ready')
+            self.record_btn.set_visibility(True)
+            self.stop_btn.set_visibility(False)
+            self._set_enabled(self.pause_btn, False)
             self.blink_timer.deactivate()
             self.blink_pause_timer.deactivate()
-            self.record_btn.set_source(self._asset('rec-button.png'))
-            self.pause_btn.set_source(self._asset('pause.png'))
+            self.pause_btn.props('icon=pause color=grey')
+            self.rec_indicator.props('name=fiber_manual_record')
+            self.rec_indicator.classes('text-transparent', remove='text-red-500 text-orange-500')
         elif is_paused:
-            self.status_label.set_text('Status: Paused')
-            self._set_enabled(self.record_btn, False)
-            self._set_enabled(self.stop_btn,   True)
-            self._set_enabled(self.pause_btn,  True)
+            self.status_label.set_text('Paused')
+            self.record_btn.set_visibility(False)
+            self.stop_btn.set_visibility(True)
+            self._set_enabled(self.pause_btn, True)
             self.blink_timer.deactivate()
-            self.record_btn.set_source(self._asset('rec-button.png'))
+            self.rec_indicator.props('name=pause')
+            self.pause_btn.props('icon=play_arrow color=grey-7')
+            self.rec_indicator.classes('text-transparent', remove='text-red-500')
             self.blink_pause_timer.activate()
         else:
-            self.status_label.set_text('Status: Recording')
-            self._set_enabled(self.record_btn, False)
-            self._set_enabled(self.stop_btn,   True)
-            self._set_enabled(self.pause_btn,  True)
+            self.status_label.set_text('Recording')
+            self.record_btn.set_visibility(False)
+            self.stop_btn.set_visibility(True)
+            self._set_enabled(self.pause_btn, True)
             self.blink_pause_timer.deactivate()
-            self.pause_btn.set_source(self._asset('pause.png'))
+            self.rec_indicator.props('name=fiber_manual_record')
+            self.pause_btn.props('icon=pause color=grey')
+            self.rec_indicator.classes('text-red-500', remove='text-transparent text-orange-500')
             self.blink_timer.activate()
 
         self._ui_recording = is_recording
@@ -193,13 +204,11 @@ class LogboyGUI:
         self.is_paused     = is_paused
 
     def _refresh_rec_info(self):
-        start_time = self.controller.get_record_start_time()
-        if start_time is None:
+        elapsed = self.controller.get_elapsed()
+        if elapsed is None:
             return
         bag_path = self.controller.get_bag_path()
-        # elapsed
-        elapsed = int(time.monotonic() - start_time)
-        h, rem = divmod(elapsed, 3600)
+        h, rem = divmod(int(elapsed), 3600)
         m, s = divmod(rem, 60)
         self.elapsed_label.set_text(f'{h:02d}:{m:02d}:{s:02d}')
         # name and path
@@ -233,25 +242,25 @@ class LogboyGUI:
 
     # ── Helpers ──────────────────────────────────────────────────────────────
 
-    def _asset(self, filename: str) -> str:
-        path = os.path.join(self.assets_dir, filename)
-        return path if os.path.exists(path) else 'https://placehold.co/100x100/gray/gray'
-
     def _set_enabled(self, element, enabled: bool):
         if enabled:
-            element.classes(remove='opacity-30 pointer-events-none')
+            element.props(remove='disable')
         else:
-            element.classes(add='opacity-30 pointer-events-none')
+            element.props(add='disable')
 
     def _blink_record(self):
         self._blink_state = not self._blink_state
-        src = self._asset('rec-button_inactive_2.png') if self._blink_state else self._asset('rec-button.png')
-        self.record_btn.set_source(src)
+        if self._blink_state:
+            self.rec_indicator.classes('text-red-500', remove='text-transparent')
+        else:
+            self.rec_indicator.classes('text-transparent', remove='text-red-500')
 
     def _blink_pause(self):
         self._blink_state = not self._blink_state
-        src = self._asset('circular.png') if self._blink_state else self._asset('pause.png')
-        self.pause_btn.set_source(src)
+        if self._blink_state:
+            self.rec_indicator.classes('text-orange-500', remove='text-transparent')
+        else:
+            self.rec_indicator.classes('text-transparent', remove='text-orange-500')
 
 
 # ── Main ─────────────────────────────────────────────────────────────────────
@@ -267,11 +276,15 @@ def main():
     controller = LogboyController()
     controller.configure_recorder(config)   # ← einmalig hier, nicht in start_recording
 
+    ament_prefix_path = os.getenv('AMENT_PREFIX_PATH', '')
+    assets_dir = os.path.join(ament_prefix_path.split(os.pathsep)[0], 'share', 'logboy', 'assets')
+    app.add_static_files('/assets', assets_dir)
+
     @ui.page('/')
     def index():
         LogboyGUI(controller, config)
 
-    ui.run(title='logboy', reload=False)
+    ui.run(title='logboy', favicon=f'{assets_dir}/logboy_logo.png', reload=False)
 
 
 if __name__ == '__main__':

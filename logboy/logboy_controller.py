@@ -10,6 +10,8 @@ class LogboyController:
             rclpy.init()
         self.node = LogboyNode()
         self._record_start_time: float | None = None
+        self._paused_duration: float = 0.0
+        self._pause_start_time: float | None = None
         self._executor = MultiThreadedExecutor()
         self._executor.add_node(self.node)
         self._spin_thread = threading.Thread(target=self._executor.spin, daemon=True)
@@ -33,19 +35,32 @@ class LogboyController:
     def start_recording(self):
         self.node.start_recording()
         self._record_start_time = time.monotonic()
+        self._paused_duration = 0.0
+        self._pause_start_time = None
 
     def stop_recording(self):
         self.node.stop_recording()
         self._record_start_time = None
-
-    def get_record_start_time(self) -> float | None:
-        return self._record_start_time
+        self._paused_duration = 0.0
+        self._pause_start_time = None
 
     def pause_recording(self):
         self.node.pause_recording()
+        self._pause_start_time = time.monotonic()
 
     def resume_recording(self):
         self.node.resume_recording()
+        if self._pause_start_time is not None:
+            self._paused_duration += time.monotonic() - self._pause_start_time
+            self._pause_start_time = None
+
+    def get_elapsed(self) -> float | None:
+        if self._record_start_time is None:
+            return None
+        elapsed = time.monotonic() - self._record_start_time - self._paused_duration
+        if self._pause_start_time is not None:
+            elapsed -= time.monotonic() - self._pause_start_time
+        return elapsed
 
     def get_topics(self):
         return self.node.get_rec_topics()
