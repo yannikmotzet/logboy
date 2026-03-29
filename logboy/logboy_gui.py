@@ -24,10 +24,17 @@ class LogboyGUI:
     # ── Build ────────────────────────────────────────────────────────────────
 
     def _build_ui(self):
-        # Compact top bar — buttons are absolutely pinned to centre, nothing can move them
-        with ui.element('div').classes('relative flex items-center w-full px-4 py-2 min-h-12'):
-            # Buttons + status: absolutely centred, fixed total width so buttons never move
-            with ui.row().classes('absolute left-1/2 -translate-x-1/2 items-center gap-1'):
+        # Top bar — wraps to second line only when window is too narrow
+        with ui.row().classes('items-center w-full px-4 py-2 flex-wrap gap-y-1'):
+            # Left: logo + title (shrink-0 so it never compresses)
+            with ui.row().classes('items-center gap-2 shrink-0'):
+                ui.image('/assets/logboy_logo.png').classes('w-7 h-7')
+                ui.label('logboy').classes('text-lg font-bold')
+
+            ui.element('div').classes('flex-1')
+
+            # Center: buttons + fixed-width status (w-36 keeps width constant)
+            with ui.row().classes('items-center gap-1 shrink-0'):
                 self.record_btn = ui.button(icon='fiber_manual_record', on_click=self.start_recording) \
                     .props('round flat color="red"')
                 self.stop_btn = ui.button(icon='stop', on_click=self.stop_recording) \
@@ -38,13 +45,10 @@ class LogboyGUI:
                 self.rec_indicator = ui.icon('fiber_manual_record', size='xs').classes('text-transparent ml-2')
                 self.status_label = ui.label('Ready').classes('text-sm w-36')
 
-            # Left: logo + title
-            with ui.row().classes('items-center gap-2'):
-                ui.image('/assets/logboy_logo.png').classes('w-7 h-7')
-                ui.label('logboy').classes('text-lg font-bold')
+            ui.element('div').classes('flex-1')
 
-            # Right: settings inputs + clock + dark toggle
-            with ui.row().classes('items-center gap-2 ml-auto'):
+            # Right: settings + clock + dark (wraps to next line when no space)
+            with ui.row().classes('items-center gap-2 shrink-0'):
                 ui.label('Max').classes('text-xs text-gray-400')
                 self.max_input = ui.input(placeholder='——:——:——') \
                     .props('mask="##:##:##" fill-mask="0" dense borderless hide-bottom-space') \
@@ -55,7 +59,7 @@ class LogboyGUI:
                         .classes('cursor-pointer text-gray-400') \
                         .on('click', self._clear_max)
                     self.max_clear_btn.set_visibility(False)
-                ui.label('Delay').classes('text-xs text-gray-400 ml-4')
+                ui.label('Delay').classes('text-xs text-gray-400 ml-2')
                 self.delay_input = ui.input(placeholder='——:——:——') \
                     .props('mask="##:##:##" fill-mask="0" dense borderless hide-bottom-space') \
                     .classes('w-[5.5rem] text-xs font-mono text-gray-400') \
@@ -65,7 +69,7 @@ class LogboyGUI:
                         .classes('cursor-pointer text-gray-400') \
                         .on('click', self._clear_delay)
                     self.delay_clear_btn.set_visibility(False)
-                ui.label('Split').classes('text-xs text-gray-400 ml-4')
+                ui.label('Split').classes('text-xs text-gray-400 ml-2')
                 self.split_select = ui.select(
                     {'time': 'Time', 'size': 'Size'},
                     value=None, on_change=self._on_split_change,
@@ -541,7 +545,7 @@ def main():
     def index():
         ui.add_head_html('''
         <style>
-        #logboy-disconnected {
+#logboy-disconnected {
             display: none;
             position: fixed;
             bottom: 2rem;
