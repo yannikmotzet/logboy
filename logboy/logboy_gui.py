@@ -15,8 +15,10 @@ class LogboyGUI:
         self.is_paused = False
 
         self._blink_state = False
-        self._ui_recording = False   # last known UI state
+        self._ui_recording = False
         self._ui_paused    = False
+        self._countdown_remaining = 0
+        self._countdown_timer = None
         self._build_ui()
 
     # ── Build ────────────────────────────────────────────────────────────────
@@ -33,6 +35,27 @@ class LogboyGUI:
                 self.dark = ui.dark_mode(value=True)
                 self.dark_btn = ui.button(icon='dark_mode', on_click=self._toggle_dark).props('flat round')
 
+        # Settings dialog
+        with ui.dialog() as self.settings_dialog, ui.card().classes('w-72'):
+            with ui.row().classes('items-center justify-between w-full mb-2'):
+                ui.label('Recording options').classes('text-base font-semibold')
+                ui.button(icon='close', on_click=self.settings_dialog.close).props('flat round dense')
+            with ui.column().classes('gap-4 w-full'):
+                with ui.row().classes('items-center gap-3'):
+                    ui.label('Max duration').classes('text-sm text-gray-400 w-28')
+                    self.max_input = ui.input(placeholder='HH:MM:SS') \
+                        .props('mask="##:##:##" fill-mask="0" dense outlined hide-bottom-space clearable') \
+                        .classes('w-32') \
+                        .on('change', self._update_settings_summary) \
+                        .on('clear', self._clear_max)
+                with ui.row().classes('items-center gap-3'):
+                    ui.label('Countdown').classes('text-sm text-gray-400 w-28')
+                    self.delay_input = ui.input(placeholder='HH:MM:SS') \
+                        .props('mask="##:##:##" fill-mask="0" dense outlined hide-bottom-space clearable') \
+                        .classes('w-32') \
+                        .on('change', self._update_settings_summary) \
+                        .on('clear', self._clear_delay)
+
         # Transport controls
         with ui.row().classes('items-center justify-center w-full mt-4 gap-2'):
             self.record_btn = ui.button(icon='fiber_manual_record', on_click=self.start_recording) \
@@ -42,10 +65,21 @@ class LogboyGUI:
             self.stop_btn.set_visibility(False)
             self.pause_btn = ui.button(icon='pause', on_click=self.toggle_pause) \
                 .props('round flat size="xl" color="grey" disable')
+            self.settings_btn = ui.button(icon='settings', on_click=self.settings_dialog.open) \
+                .props('round flat color="grey-6"')
 
         with ui.row().classes('items-center justify-center w-full mt-2 gap-1'):
             self.rec_indicator = ui.icon('fiber_manual_record', size='sm').classes('text-transparent')
             self.status_label = ui.label('Ready').classes('text-lg')
+
+        self.settings_summary = ui.label('').classes('text-xs text-gray-500 text-center w-full mt-1')
+
+        # pre-populate max_duration from config if set
+        cfg_max = self.config.get('max_duration')
+        if cfg_max:
+            h, m, s = self._secs_to_hms(cfg_max)
+            self.max_input.value = f'{h:02d}:{m:02d}:{s:02d}'
+            self._update_settings_summary()
 
         # Recording info panel
         with ui.row().classes('items-center justify-center w-full gap-8 mt-1') as self.rec_info_row:
@@ -121,12 +155,46 @@ class LogboyGUI:
     # ── Transport controls ───────────────────────────────────────────────────
 
     def start_recording(self):
+        if self._countdown_timer is not None:
+            self._cancel_countdown()
+            return
+        delay = self._get_delay_secs()
+        if delay > 0:
+            self._set_enabled(self.settings_btn, False)
+            self._countdown_remaining = int(delay)
+            self._update_countdown_label()
+            self._countdown_timer = ui.timer(1.0, self._countdown_tick)
+        else:
+            self._do_start_recording()
+
+    def _cancel_countdown(self):
+        self._countdown_timer.cancel()
+        self._countdown_timer = None
+        self._countdown_remaining = 0
+        self.status_label.set_text('Ready')
+        self._set_enabled(self.settings_btn, True)
+
+    def _countdown_tick(self):
+        self._countdown_remaining -= 1
+        if self._countdown_remaining <= 0:
+            self._countdown_timer.cancel()
+            self._countdown_timer = None
+            self._do_start_recording()
+        else:
+            self._update_countdown_label()
+
+    def _update_countdown_label(self):
+        self.status_label.set_text(f'Starting in {self._countdown_remaining}s… (click ● to cancel)')
+
+    def _do_start_recording(self):
+        self.controller.set_max_duration(self._get_max_duration_secs())
         self.controller.start_recording()
         self.is_paused = False
         self.status_label.set_text('Recording')
         self.record_btn.set_visibility(False)
         self.stop_btn.set_visibility(True)
         self._set_enabled(self.pause_btn, True)
+        self._set_enabled(self.settings_btn, False)
         self.rec_indicator.classes('text-red-500', remove='text-transparent')
         self.blink_timer.activate()
 
@@ -139,7 +207,9 @@ class LogboyGUI:
         self.pause_btn.props('icon=pause color=grey')
         self.stop_btn.set_visibility(False)
         self.record_btn.set_visibility(True)
+        self._set_enabled(self.record_btn, True)
         self._set_enabled(self.pause_btn, False)
+        self._set_enabled(self.settings_btn, True)
         self.rec_indicator.props('name=fiber_manual_record')
         self.rec_indicator.classes('text-transparent', remove='text-red-500 text-orange-500')
 
@@ -170,6 +240,7 @@ class LogboyGUI:
         snapshots: list[TopicSnapshot] = self.controller.get_stats()
         self.table.rows = [self._snapshot_to_row(s) for s in sorted(snapshots, key=lambda s: s.name)]
         self.table.update()
+        self.controller.check_max_duration()
         self._sync_state()
         self._refresh_rec_info()
         self._refresh_free_space()
@@ -191,6 +262,7 @@ class LogboyGUI:
             self.blink_timer.deactivate()
             self.blink_pause_timer.deactivate()
             self.pause_btn.props('icon=pause color=grey')
+            self._set_enabled(self.settings_btn, True)
             self.rec_indicator.props('name=fiber_manual_record')
             self.rec_indicator.classes('text-transparent', remove='text-red-500 text-orange-500')
         elif is_paused:
@@ -211,6 +283,7 @@ class LogboyGUI:
             self.blink_pause_timer.deactivate()
             self.rec_indicator.props('name=fiber_manual_record')
             self.pause_btn.props('icon=pause color=grey')
+            self._set_enabled(self.settings_btn, False)
             self.rec_indicator.classes('text-red-500', remove='text-transparent text-orange-500')
             self.blink_timer.activate()
 
@@ -222,10 +295,19 @@ class LogboyGUI:
         elapsed = self.controller.get_elapsed()
         if elapsed is None:
             return
+
+        max_dur = self.controller.get_max_duration()
         bag_path = self.controller.get_bag_path()
         h, rem = divmod(int(elapsed), 3600)
         m, s = divmod(rem, 60)
         self.elapsed_label.set_text(f'{h:02d}:{m:02d}:{s:02d}')
+        if max_dur and not self.is_paused:
+            remaining = max(0.0, max_dur - elapsed)
+            rh, rrem = divmod(int(remaining), 3600)
+            rm, rs = divmod(rrem, 60)
+            self.status_label.set_text(f'Recording · {rh:02d}:{rm:02d}:{rs:02d} left')
+        elif not self.is_paused:
+            self.status_label.set_text('Recording')
         if bag_path:
             self.rec_name_label.set_text(os.path.basename(bag_path))
             self.rec_path_label.set_text(os.path.dirname(bag_path))
@@ -282,6 +364,46 @@ class LogboyGUI:
         }
 
     # ── Helpers ──────────────────────────────────────────────────────────────
+
+    def _clear_max(self, *_):
+        self.max_input.value = ''
+        self._update_settings_summary()
+
+    def _clear_delay(self, *_):
+        self.delay_input.value = ''
+        self._update_settings_summary()
+
+    def _update_settings_summary(self, *_):
+        parts = []
+        if self._get_max_duration_secs():
+            parts.append(f'Max {self.max_input.value}')
+        if self._get_delay_secs():
+            parts.append(f'Delay {self.delay_input.value}')
+        self.settings_summary.set_text('  ·  '.join(parts))
+
+    def _get_max_duration_secs(self) -> float | None:
+        total = self._parse_hms(self.max_input.value)
+        return float(total) if total > 0 else None
+
+    def _get_delay_secs(self) -> float:
+        return float(self._parse_hms(self.delay_input.value))
+
+    @staticmethod
+    def _parse_hms(value: str) -> int:
+        parts = (value or '').split(':')
+        if len(parts) != 3:
+            return 0
+        try:
+            return int(parts[0] or 0) * 3600 + int(parts[1] or 0) * 60 + int(parts[2] or 0)
+        except ValueError:
+            return 0
+
+    @staticmethod
+    def _secs_to_hms(secs: float) -> tuple[int, int, int]:
+        secs = int(secs)
+        h, rem = divmod(secs, 3600)
+        m, s = divmod(rem, 60)
+        return h, m, s
 
     def _toggle_dark(self):
         self.dark.toggle()

@@ -12,6 +12,7 @@ class LogboyController:
         self._record_start_time: float | None = None
         self._paused_duration: float = 0.0
         self._pause_start_time: float | None = None
+        self._max_duration: float | None = None
         self._executor = MultiThreadedExecutor()
         self._executor.add_node(self.node)
         self._spin_thread = threading.Thread(target=self._executor.spin, daemon=True)
@@ -31,6 +32,19 @@ class LogboyController:
 
     def set_topics(self, topics):
         self.node.set_rec_topics(topics)
+
+    def set_max_duration(self, seconds: float | None):
+        self._max_duration = seconds
+
+    def get_max_duration(self) -> float | None:
+        return self._max_duration
+
+    def check_max_duration(self):
+        if self._max_duration is None:
+            return
+        elapsed = self.get_elapsed()
+        if elapsed is not None and elapsed >= self._max_duration:
+            self.stop_recording()
 
     def start_recording(self):
         self.node.start_recording()

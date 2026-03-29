@@ -123,6 +123,11 @@ def monitor_loop(controller: LogboyController,
                  refresh: float = 1.0,
                  is_recording: bool = True):
     while not stop_event.is_set():
+        if is_recording:
+            controller.check_max_duration()
+            if controller.get_bag_path() is None and not stop_event.is_set():
+                stop_event.set()
+                break
         live.update(build_table(controller.get_stats(), get_paused(), get_elapsed(), is_recording, controller.get_bag_path()))
         time.sleep(refresh)
 
