@@ -1,8 +1,8 @@
 # Logboy
 
-Logboy is a powerful tool designed to record ROS 2 `.mcap` files. It seamlessly integrates with the recording management system [Bagman](https://github.com/yannikmotzet/bagman/tree/main) to provide a comprehensive solution for managing your recordings.
+Logboy is a ROS 2 `.mcap` recording tool with both a CLI and a web-based GUI. It provides real-time topic monitoring, interactive topic selection, and integrates with [Bagman](https://github.com/yannikmotzet/bagman/tree/main) for recording management.
 
-> **Note:** This tool is in development. Some of the features are not implemented yet.
+> **Note:** This tool is in development. Some features are not yet implemented.
 
 <p align="center">
     <img src="assets/logboy_logo.png" alt="Logboy Logo" width="100">
@@ -14,35 +14,96 @@ Logboy is a powerful tool designed to record ROS 2 `.mcap` files. It seamlessly 
 - [Features](#features)
 - [Prerequisites](#prerequisites)
 - [Installation](#installation)
+- [Usage](#usage)
+  - [GUI](#gui)
+  - [CLI](#cli)
 - [Contributing](#contributing)
 
 </details>
 
-## Key Features
+## Features
 
-- **Command-Line Interface (CLI)**: Efficient and scriptable recording control.
-- **Graphical User Interface (GUI)**: Intuitive and user-friendly interface for managing recordings.
-- **Topic Monitoring**: Real-time monitoring of ROS 2 topics.
-- **Configuration via YAML**: Flexible `.yaml` file-based setup for storage locations, topic selection, and metadata (e.g., descriptions).
+- **Recording**: Record ROS 2 topics to `.mcap` files with configurable storage path, robot name, max duration, and delay.
+- **Topic Monitoring**: Real-time FPS, drop rate, and age tracking for all subscribed topics.
+- **Interactive Topic Selection**: Select and filter topics interactively from the CLI or GUI.
+- **Web GUI**: Browser-based interface with live topic monitor, recording controls, and a storage browser.
+- **YAML Configuration**: Flexible `.yaml` file for storage path, robot name, topic list, and expected FPS values.
 - **Integration with Bagman**: Simplified upload and management of recordings.
 
-<p align="center">
-    <img src="assets/screenshot_cli.png" alt="Logboy GUI Screenshot" width="600">
-</p>
-
-<p align="center">
-    <img src="assets/screenshot_gui.png" alt="Logboy GUI Screenshot" width="600">
-</p>
-
-
 ## Prerequisites
+
 TBD
 
 ## Installation
+
 TBD
 
-## Run
-TBD
+## Usage
+
+### GUI
+
+Start the GUI:
+```sh
+logboy_gui --config path/to/config.yaml
+```
+
+**Record page** — live topic monitor with FPS, drops, and message counts. Controls for max duration, start delay, and pause/resume.
+
+<p align="center">
+    <img src="assets/screenshot_ui_record.png" alt="GUI Record" width="700">
+</p>
+
+**Topic selection dialog** — filter and select topics with live FPS, message type, and configurable expected FPS.
+
+<p align="center">
+    <img src="assets/screenshot_ui_topic_selection.png" alt="GUI Topic Selection" width="700">
+</p>
+
+**Storage page** — browse, inspect, and delete recordings.
+
+<p align="center">
+    <img src="assets/screenshot_ui_recordings.png" alt="GUI Recordings" width="700">
+</p>
+
+### CLI
+
+**Record topics:**
+```sh
+logboy record -c path/to/config.yaml
+```
+
+<p align="center">
+    <img src="assets/screenshot_cli_record.png" alt="CLI Recording" width="700">
+</p>
+
+**Monitor topics without recording:**
+```sh
+logboy monitor -c path/to/config.yaml
+```
+
+<p align="center">
+    <img src="assets/screenshot_cli_monitor.png" alt="CLI Monitor" width="700">
+</p>
+
+**Select topics interactively:**
+```sh
+logboy topics -c path/to/config.yaml
+```
+
+Use `↑↓` to navigate, `Space` to toggle, type to filter, and `Enter` to confirm. The selection is saved back to the config file.
+
+<p align="center">
+    <img src="assets/screenshot_cli_topic_selection.png" alt="CLI Topic Selection" width="700">
+</p>
+
+**Browse recordings:**
+```sh
+logboy recordings -c path/to/config.yaml
+```
+
+<p align="center">
+    <img src="assets/screenshot_cli_recordings.png" alt="CLI Recordings" width="700">
+</p>
 
 ## Contributing
 
