@@ -12,6 +12,7 @@ from rich.live import Live
 from rich.table import Table
 from rich.text import Text
 from rich.console import Console
+from rich.markup import escape
 from rich import box
 from logboy.logboy_controller import LogboyController, list_recordings
 from logboy.logboy_stats import TopicSnapshot
@@ -154,6 +155,57 @@ def read_keypresses(pause_callback, stop_event):
         termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
 
 
+# ── Topic Selector ────────────────────────────────────────────────────────────
+
+def topic_selector(all_topics: list[dict], active_names: set[str], pre_selected: set[str]) -> list[str] | None:
+    names   = [t['name'] for t in all_topics]
+    selected = set(pre_selected)
+    cursor  = 0
+
+    def build():
+        table = Table(box=None, show_header=False, padding=(0, 0), width=console.width)
+        table.add_column(width=4)
+        table.add_column()
+        table.add_column(justify="right", style="dim")
+        for i, t in enumerate(all_topics):
+            check     = "[green]\\[x][/green]" if t['name'] in selected else "\\[ ]"
+            is_active = t['name'] in active_names
+            name_style = "bold" if i == cursor else ("dim" if not is_active else "")
+            prefix    = "[bold cyan]>[/bold cyan]" if i == cursor else " "
+            name      = escape(t['name'])
+            label     = name if is_active else f"{name} [dim](inactive)[/dim]"
+            fps_str   = f"{t['fps']} fps" if t.get('fps') not in (None, 0, 0.0) else ""
+            table.add_row(f"{prefix} {check}", f"[{name_style}]{label}[/{name_style}]" if name_style else label, fps_str)
+        return table
+
+    fd = sys.stdin.fileno()
+    old_settings = termios.tcgetattr(fd)
+    try:
+        tty.setcbreak(fd)
+        console.print("[dim]↑↓ move   [SPACE] toggle   [ENTER] confirm   [Ctrl+C] cancel[/dim]\n")
+        with Live(build(), console=console, screen=False, refresh_per_second=60) as live:
+            while True:
+                try:
+                    ch = sys.stdin.read(1)
+                except KeyboardInterrupt:
+                    return None
+                if ch in ('\r', '\n'):
+                    return [n for n in names if n in selected]
+                elif ch == ' ':
+                    name = names[cursor]
+                    selected.discard(name) if name in selected else selected.add(name)
+                elif ch == '\x1b':
+                    if sys.stdin.read(1) == '[':
+                        arrow = sys.stdin.read(1)
+                        if arrow == 'A':
+                            cursor = max(0, cursor - 1)
+                        elif arrow == 'B':
+                            cursor = min(len(names) - 1, cursor + 1)
+                live.update(build())
+    finally:
+        termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
+
+
 # ── Config ────────────────────────────────────────────────────────────────────
 
 def load_config(config_file: str) -> dict:
@@ -169,6 +221,49 @@ def validate_config(config: dict):
 
 
 # ── Commands ──────────────────────────────────────────────────────────────────
+
+@app.command()
+def topics(
+    config: Path = typer.Option(..., "-c", "--config", help="Path to config YAML", exists=True, file_okay=True, dir_okay=False),
+):
+    """Interactively select topics to record and update the config."""
+    cfg = load_config(str(config))
+
+    devnull_fd = os.open(os.devnull, os.O_WRONLY)
+    saved_stderr_fd = os.dup(2)
+    os.dup2(devnull_fd, 2)
+    os.close(devnull_fd)
+    try:
+        controller = LogboyController()
+        active_topics = controller.node.discover_topics()
+        controller.shutdown()
+    finally:
+        os.dup2(saved_stderr_fd, 2)
+        os.close(saved_stderr_fd)
+
+    active_names  = {t['name'] for t in active_topics}
+    config_topics = {t['name']: t for t in (cfg.get('topics') or [])}
+
+    all_topics_map = {t['name']: t for t in active_topics}
+    all_topics_map.update(config_topics)  # config takes precedence (preserves fps)
+    all_topics = [t for _, t in sorted(all_topics_map.items())]
+
+    selected_names = topic_selector(all_topics, active_names, set(config_topics.keys()))
+
+    if selected_names is None:
+        raise typer.Exit(0)
+
+    new_topics = [
+        config_topics[n] if n in config_topics else all_topics_map[n]
+        for n in selected_names
+    ]
+    cfg['topics'] = new_topics
+
+    with open(config, 'w') as f:
+        yaml.dump(cfg, f, default_flow_style=False, sort_keys=False)
+
+    console.print(f"[green]✓[/green] {config} updated — {len(new_topics)} topic(s) selected.")
+
 
 @app.command()
 def record(
