@@ -5,8 +5,51 @@ import subprocess
 import yaml
 import argparse
 from datetime import datetime
-from logboy.logboy_controller import LogboyController
+from logboy.logboy_controller import LogboyController, list_recordings
 from logboy.logboy_stats import TopicSnapshot
+
+
+def _fmt_bytes(total: float) -> str:
+    for unit in ('B', 'KB', 'MB', 'GB'):
+        if total < 1024:
+            return f'{total:.1f} {unit}'
+        total /= 1024
+    return f'{total:.1f} TB'
+
+
+def _build_nav_drawer(active: str = '/') -> None:
+    is_expanded = app.storage.user.get('nav_expanded', True)
+    state = {'expanded': is_expanded}
+
+    with ui.left_drawer(value=True).props(f'bordered width={"180" if is_expanded else "56"}') as drawer:
+
+        # Collapsed view — icons only
+        with ui.column().classes('items-center gap-2 pt-2') as col_mini:
+            ui.button(icon='menu', on_click=lambda: toggle()).props('flat round dense')
+            ui.separator().classes('w-full my-0')
+            ui.button(icon='fiber_manual_record', on_click=lambda: ui.navigate.to('/record')) \
+                .props(f'flat round dense {"color=primary" if active == "/record" else ""}')
+            ui.button(icon='video_library', on_click=lambda: ui.navigate.to('/storage')) \
+                .props(f'flat round dense {"color=primary" if active == "/storage" else ""}')
+        col_mini.set_visibility(not is_expanded)
+
+        # Expanded view — icon + label
+        with ui.column().classes('gap-0 pt-2 w-full') as col_full:
+            with ui.row().classes('px-2 pb-1'):
+                ui.button(icon='menu', on_click=lambda: toggle()).props('flat round dense')
+            ui.separator().classes('my-1')
+            ui.button('Record', icon='fiber_manual_record', on_click=lambda: ui.navigate.to('/record')) \
+                .props(f'flat align=left {"color=primary" if active == "/record" else ""}').classes('w-full')
+            ui.button('Storage', icon='video_library', on_click=lambda: ui.navigate.to('/storage')) \
+                .props(f'flat align=left {"color=primary" if active == "/storage" else ""}').classes('w-full')
+        col_full.set_visibility(is_expanded)
+
+    def toggle():
+        state['expanded'] = not state['expanded']
+        app.storage.user['nav_expanded'] = state['expanded']
+        col_mini.set_visibility(not state['expanded'])
+        col_full.set_visibility(state['expanded'])
+        drawer.props(f'width={"180" if state["expanded"] else "56"}')
 
 
 def _git_version(start_path: str) -> str:
@@ -105,8 +148,9 @@ class LogboyGUI:
                     .on('click', self._clear_split)
                 self.split_clear_btn.set_visibility(False)
                 self.clock_label = ui.label().classes('text-xs font-mono text-gray-400 ml-2')
-                self.dark = ui.dark_mode(value=True)
-                self.dark_btn = ui.button(icon='dark_mode', on_click=self._toggle_dark).props('flat round dense')
+                self.dark = ui.dark_mode(value=app.storage.user.get('dark_mode', True))
+                self.dark_btn = ui.button(icon='dark_mode' if app.storage.user.get('dark_mode', True) else 'light_mode',
+                                          on_click=self._toggle_dark).props('flat round dense')
 
         # pre-populate max_duration from config if set
         cfg_max = self.config.get('max_duration')
@@ -377,7 +421,7 @@ class LogboyGUI:
             self.rec_name_label.set_text(os.path.basename(bag_path))
             self.rec_path_label.set_text(os.path.dirname(bag_path))
             size_bytes = self._bag_size_bytes(bag_path)
-            self.size_label.set_text(self._fmt_bytes(size_bytes))
+            self.size_label.set_text(_fmt_bytes(size_bytes))
             # update time-left estimate in free label
             if elapsed > 5 and size_bytes > 0:
                 storage_path = self.config.get('storage_path', '')
@@ -387,7 +431,7 @@ class LogboyGUI:
                     secs_left = int(free_bytes / rate)
                     h2, r2 = divmod(secs_left, 3600)
                     m2 = r2 // 60
-                    self.free_label.set_text(f'{self._fmt_bytes(free_bytes)} ~{h2}h{m2:02d}m')
+                    self.free_label.set_text(f'{_fmt_bytes(free_bytes)} ~{h2}h{m2:02d}m')
                 except OSError:
                     pass
 
@@ -405,7 +449,7 @@ class LogboyGUI:
         self.free_label.classes('text-gray-400', remove='text-red-500')
         try:
             free_bytes = shutil.disk_usage(storage_path).free
-            self.free_label.set_text(self._fmt_bytes(free_bytes))
+            self.free_label.set_text(_fmt_bytes(free_bytes))
         except OSError:
             self.free_label.set_text('—')
 
@@ -414,14 +458,6 @@ class LogboyGUI:
         if not os.path.isdir(bag_path):
             return 0
         return sum(e.stat().st_size for e in os.scandir(bag_path) if e.is_file())
-
-    @staticmethod
-    def _fmt_bytes(total: float) -> str:
-        for unit in ('B', 'KB', 'MB', 'GB'):
-            if total < 1024:
-                return f'{total:.1f} {unit}'
-            total /= 1024
-        return f'{total:.1f} TB'
 
     @staticmethod
     def _snapshot_to_row(s: TopicSnapshot) -> dict:
@@ -519,6 +555,7 @@ class LogboyGUI:
 
     def _toggle_dark(self):
         self.dark.toggle()
+        app.storage.user['dark_mode'] = self.dark.value
         self.dark_btn.props('icon=light_mode' if self.dark.value else 'icon=dark_mode')
 
     def _set_enabled(self, element, enabled: bool):
@@ -542,6 +579,114 @@ class LogboyGUI:
             self.rec_indicator.classes('text-transparent', remove='text-orange-500')
 
 
+# ── Recordings page ──────────────────────────────────────────────────────────
+
+class RecordingsPage:
+    def __init__(self, controller: LogboyController, config: dict):
+        self.controller = controller
+        self.config = config
+        self._build_ui()
+
+    def _build_ui(self):
+        with ui.row().classes('items-center w-full px-4 py-2 gap-2'):
+            ui.image('/assets/logboy_logo.png').classes('w-7 h-7')
+            ui.label('logboy').classes('text-lg font-bold')
+            ui.label('· Recordings').classes('text-lg text-gray-400')
+            ui.label(os.path.expanduser(self.config.get('storage_path', '—'))) \
+                .classes('text-xs font-mono text-gray-400 ml-2')
+            ui.element('div').classes('flex-1')
+            self.count_label = ui.label().classes('text-xs text-gray-400')
+            ui.button(icon='refresh', on_click=self._load).props('flat round dense').tooltip('Refresh')
+            dark = ui.dark_mode(value=app.storage.user.get('dark_mode', True))
+            dark_btn = ui.button(
+                icon='dark_mode' if app.storage.user.get('dark_mode', True) else 'light_mode',
+                on_click=lambda: (dark.toggle(),
+                                  app.storage.user.update({'dark_mode': dark.value}),
+                                  dark_btn.props('icon=light_mode' if dark.value else 'icon=dark_mode')),
+            ).props('flat round dense')
+
+        ui.separator().classes('my-2')
+
+        columns = [
+            {'name': 'name',     'label': 'Name',     'field': 'name',     'align': 'left',  'sortable': True},
+            {'name': 'robot',    'label': 'Robot',    'field': 'robot',    'align': 'left',  'sortable': True},
+            {'name': 'date',     'label': 'Date',     'field': 'date',     'align': 'right', 'sortable': True},
+            {'name': 'duration', 'label': 'Duration', 'field': 'duration', 'align': 'right', 'sortable': False},
+            {'name': 'size',     'label': 'Size',     'field': 'size',     'align': 'right', 'sortable': False},
+            {'name': 'topics',   'label': 'Topics',   'field': 'topics',   'align': 'right', 'sortable': True},
+            {'name': 'messages', 'label': 'Messages', 'field': 'messages', 'align': 'right', 'sortable': True},
+            {'name': 'actions',  'label': '',         'field': 'actions',  'align': 'right', 'sortable': False},
+        ]
+        self.table = ui.table(columns=columns, rows=[], row_key='name').classes('w-full')
+
+        self.table.add_slot('body-cell-name', '''
+            <q-td :props="props">
+                <q-icon v-if="props.row.is_active" name="fiber_manual_record"
+                        size="xs" class="text-red-500 mr-1" />
+                {{ props.value }}
+            </q-td>
+        ''')
+        self.table.add_slot('body-cell-actions', '''
+            <q-td :props="props">
+                <q-btn flat round dense icon="delete" color="red"
+                       :disable="props.row.is_active"
+                       @click="$parent.$emit('delete', props.row)" />
+            </q-td>
+        ''')
+        self.table.on('delete', lambda e: self._confirm_delete(e.args))
+
+        self._load()
+
+    def _load(self):
+        storage_path = self.config.get('storage_path', '')
+        active_path  = self.controller.get_bag_path()
+        recs = list_recordings(storage_path, compute_md5=False)
+
+        rows = []
+        for r in recs:
+            date_str = datetime.fromtimestamp(r.start_time).strftime('%Y-%m-%d %H:%M:%S') if r.start_time else '—'
+            if r.duration is not None:
+                h, rem = divmod(int(r.duration), 3600)
+                m, s   = divmod(rem, 60)
+                dur_str = f'{h:02d}:{m:02d}:{s:02d}' if h else f'{m:02d}:{s:02d}'
+            else:
+                dur_str = '—'
+            total_msgs  = sum(t.get('count', 0) for t in r.topics)
+            is_active   = active_path is not None and \
+                          os.path.normpath(r.path) == os.path.normpath(active_path)
+            rows.append({
+                'name':      r.name,
+                'robot':     r.robot or '—',
+                'date':      date_str,
+                'duration':  dur_str,
+                'size':      _fmt_bytes(r.size),
+                'topics':    len(r.topics),
+                'messages':  total_msgs,
+                'is_active': is_active,
+                'path':      r.path,
+            })
+
+        self.table.rows = rows
+        self.table.update()
+        self.count_label.set_text(f'{len(recs)} recording(s)')
+
+    def _confirm_delete(self, row: dict):
+        path = row['path']
+        name = row['name']
+        with ui.dialog() as dialog, ui.card():
+            ui.label(f'Delete "{name}"?').classes('text-base font-semibold')
+            ui.label('This permanently removes the recording directory.') \
+                .classes('text-sm text-gray-400 mt-1')
+            with ui.row().classes('justify-end gap-2 mt-4'):
+                ui.button('Cancel', on_click=dialog.close).props('flat')
+                ui.button('Delete', on_click=lambda: (
+                    shutil.rmtree(path),
+                    dialog.close(),
+                    self._load(),
+                )).props('color=red')
+        dialog.open()
+
+
 # ── Main ─────────────────────────────────────────────────────────────────────
 
 def main():
@@ -561,7 +706,12 @@ def main():
     app.add_static_files('/assets', assets_dir)
 
     @ui.page('/')
+    def root():
+        ui.navigate.to('/record')
+
+    @ui.page('/record')
     def index():
+        _build_nav_drawer(active='/record')
         ui.add_head_html('''
         <style>
 #logboy-disconnected {
@@ -613,7 +763,17 @@ def main():
             ui.label('·').classes('text-xs text-gray-600')
             ui.label(version).classes('text-xs font-mono text-gray-600 select-all')
 
-    ui.run(title='logboy', favicon=f'{assets_dir}/logboy_logo.png', reload=False)
+    @ui.page('/storage')
+    def storage_page():
+        _build_nav_drawer(active='/storage')
+        RecordingsPage(controller, config)
+        with ui.element('div').classes('fixed bottom-0 left-0 right-0 flex items-center justify-center gap-2 py-1'):
+            ui.link('logboy', 'https://github.com/yannikmotzet/logboy', new_tab=True) \
+                .classes('text-xs text-gray-600 hover:text-gray-400 no-underline')
+            ui.label('·').classes('text-xs text-gray-600')
+            ui.label(version).classes('text-xs font-mono text-gray-600 select-all')
+
+    ui.run(title='logboy', favicon=f'{assets_dir}/logboy_logo.png', reload=False, storage_secret='logboy')
 
 
 if __name__ == '__main__':

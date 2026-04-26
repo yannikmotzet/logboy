@@ -13,7 +13,7 @@ from rich.table import Table
 from rich.text import Text
 from rich.console import Console
 from rich import box
-from logboy.logboy_controller import LogboyController
+from logboy.logboy_controller import LogboyController, list_recordings
 from logboy.logboy_stats import TopicSnapshot
 
 app = typer.Typer(invoke_without_command=True, add_completion=False)
@@ -28,15 +28,19 @@ def callback(ctx: typer.Context):
 
 # ── TUI Helpers ───────────────────────────────────────────────────────────────
 
-def bag_size(bag_path: str | None) -> str:
-    if not bag_path or not os.path.isdir(bag_path):
-        return ""
-    total = sum(e.stat().st_size for e in os.scandir(bag_path) if e.is_file())
+def fmt_size(total: int) -> str:
     for unit in ("B", "KB", "MB", "GB"):
         if total < 1024:
             return f"{total:.1f} {unit}"
         total /= 1024
     return f"{total:.1f} TB"
+
+
+def bag_size(bag_path: str | None) -> str:
+    if not bag_path or not os.path.isdir(bag_path):
+        return ""
+    total = sum(e.stat().st_size for e in os.scandir(bag_path) if e.is_file())
+    return fmt_size(total)
 
 
 def fps_style(s: TopicSnapshot) -> str:
@@ -300,6 +304,69 @@ def monitor(
         os.close(saved_stderr_fd)
 
     console.print(build_table(final_stats, False, final_elapsed, False))
+
+
+@app.command()
+def recordings(
+    config:  Path = typer.Option(None, "-c", "--config",  help="Path to config YAML", exists=True, file_okay=True, dir_okay=False),
+    storage: Path = typer.Option(None,       "--storage", help="Storage path to scan"),
+):
+    """List all recordings in a storage directory."""
+    if config:
+        cfg = load_config(str(config))
+        storage_path = cfg.get("storage_path")
+        if not storage_path:
+            raise typer.BadParameter("Config file does not contain 'storage_path'.")
+    elif storage:
+        storage_path = str(storage)
+    else:
+        raise typer.BadParameter("Provide --storage PATH or -c config.yaml.")
+
+    recs = list_recordings(storage_path, compute_md5=False)
+
+    if not recs:
+        console.print(f"[dim]No recordings found in {storage_path}[/dim]")
+        raise typer.Exit()
+
+    table = Table(
+        title=f"[bold blue]══ Logboy ══[/bold blue]  Recordings in [dim]{storage_path}[/dim]",
+        title_justify="left",
+        box=box.SIMPLE,
+        show_footer=True,
+    )
+    table.add_column("#",        justify="right",  style="dim")
+    table.add_column("NAME",     style="cyan",     footer=f"[dim]{len(recs)} recording(s)[/dim]")
+    table.add_column("ROBOT",    style="dim")
+    table.add_column("DATE",     justify="right")
+    table.add_column("DURATION", justify="right")
+    table.add_column("SIZE",     justify="right")
+    table.add_column("TOPICS",   justify="right")
+    table.add_column("MESSAGES", justify="right")
+
+    for i, r in enumerate(recs, 1):
+        date_str = datetime.fromtimestamp(r.start_time).strftime("%Y-%m-%d %H:%M:%S") if r.start_time else "—"
+
+        if r.duration is not None:
+            h, rem = divmod(int(r.duration), 3600)
+            m, s = divmod(rem, 60)
+            dur_str = f"{h:02d}:{m:02d}:{s:02d}" if h else f"{m:02d}:{s:02d}"
+        else:
+            dur_str = "—"
+
+        total_msgs = sum(t.get('count', 0) for t in r.topics)
+
+        table.add_row(
+            str(i),
+            r.name,
+            r.robot or "—",
+            date_str,
+            dur_str,
+            fmt_size(r.size),
+            str(len(r.topics)),
+            str(total_msgs),
+        )
+
+    console.print(table)
 
 
 def main():
