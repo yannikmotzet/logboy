@@ -435,6 +435,9 @@ class LogboyGUI:
                 ui.button('None', on_click=lambda: [cb.set_value(False) for cb in checkboxes.values()]).props('flat dense size=sm')
                 ui.button(icon='refresh', on_click=lambda: refresh_list()).props('flat round dense').tooltip('Re-discover topics')
 
+            search = ui.input(placeholder='Filter topics…') \
+                .props('dense clearable outlined').classes('w-full mb-1')
+
             with ui.row().classes('w-full text-xs text-gray-400 px-2 gap-2'):
                 ui.element('div').classes('w-6')
                 ui.label('Topic').classes('flex-1 font-mono')
@@ -443,19 +446,22 @@ class LogboyGUI:
 
             ui.separator()
 
+            rows = {}  # name → row element
+
             @ui.refreshable
             def topic_list():
                 all_topics = sorted(all_topics_map.values(), key=lambda t: t['name'])
                 checkboxes.clear()
                 fps_inputs.clear()
                 fps_labels.clear()
+                rows.clear()
                 for t in all_topics:
                     name    = t['name']
                     prev    = saved_state.get(name, {})
                     checked = prev.get('checked', name in config_topics)
                     fps_val = prev.get('fps', t['fps'] if t.get('fps') not in (None, 0, 0.0) else None)
                     muted   = 'text-gray-400' if name not in active_names else ''
-                    with ui.row().classes(f'items-center w-full px-2 gap-2').style('min-height:0; height:1.4rem'):
+                    with ui.row().classes('items-center w-full px-2 gap-2').style('min-height:0; height:1.4rem') as row:
                         cb = ui.checkbox(value=checked).props('dense')
                         checkboxes[name] = cb
                         ui.label(name).classes(f'flex-1 text-sm font-mono {muted}')
@@ -463,6 +469,12 @@ class LogboyGUI:
                             .props('dense borderless hide-bottom-space').classes('w-24 text-right text-xs')
                         fps_inputs[name] = inp
                         fps_labels[name] = ui.label('—').classes('w-20 text-right text-xs')
+                    rows[name] = row
+
+            search.on('update:model-value', lambda e: [
+                rows[name].set_visibility((e.args or '').lower() in name.lower())
+                for name in rows
+            ])
 
             with ui.scroll_area().classes('h-[32rem] w-full'):
                 topic_list()
