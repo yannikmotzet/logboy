@@ -87,7 +87,7 @@ def build_table(snapshots: list[TopicSnapshot], is_paused: bool, elapsed: float,
         f"[dim]   {hint}[/dim]"
     )
 
-    table = Table(title=title, box=box.SIMPLE, show_footer=True, title_justify="left")
+    table = Table(title=title, box=box.SIMPLE, show_footer=True, title_justify="left", width=console.width)
     table.add_column("TOPIC", style="cyan", footer=f"[dim]{len(snapshots)} topic(s)[/dim]")
     table.add_column("EXP FPS", justify="right", style="dim")
     table.add_column("FPS", justify="right")
