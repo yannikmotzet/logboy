@@ -159,7 +159,8 @@ class LogboyNode(Node):
             expected_fps: float = float(topic.get('fps', 0.0))
 
             if name in existing:
-                continue  # subscription already exists
+                self._topic_stats[name].expected_fps = expected_fps
+                continue
 
             try:
                 msg_cls = self.__get_message_type(msg_type_str)
