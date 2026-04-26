@@ -158,19 +158,31 @@ def read_keypresses(pause_callback, stop_event):
 # ── Topic Selector ────────────────────────────────────────────────────────────
 
 def topic_selector(all_topics: list[dict], active_names: set[str], pre_selected: set[str], get_stats=None) -> list[str] | None:
-    names    = [t['name'] for t in all_topics]
-    selected = set(pre_selected)
-    cursor   = 0
+    names      = [t['name'] for t in all_topics]
+    selected   = set(pre_selected)
+    cursor     = 0
+    filter_str = ""
+
+    def get_filtered() -> list[dict]:
+        if not filter_str:
+            return all_topics
+        f = filter_str.lower()
+        return [t for t in all_topics if f in t['name'].lower()]
 
     def build():
+        filtered = get_filtered()
         stats = {s.name: s for s in get_stats()} if get_stats else {}
-        table = Table(box=box.SIMPLE, show_header=True, padding=(0, 1), width=console.width)
+        if filter_str:
+            title = f"Filter: [bold]{escape(filter_str)}[/bold]_  [dim]({len(filtered)}/{len(all_topics)})[/dim]"
+        else:
+            title = f"[dim]type to filter   {len(all_topics)} topics[/dim]"
+        table = Table(title=title, title_justify="left", box=box.SIMPLE, show_header=True, padding=(0, 1), width=console.width)
         table.add_column("", width=4)
         table.add_column("TOPIC")
         table.add_column("EXP FPS", justify="right", style="dim", width=10)
         table.add_column("LIVE FPS", justify="right", width=10)
         table.add_column("AGE", justify="right", style="dim", width=8)
-        for i, t in enumerate(all_topics):
+        for i, t in enumerate(filtered):
             s          = stats.get(t['name'])
             check      = "[green]\\[x][/green]" if t['name'] in selected else "\\[ ]"
             is_active  = t['name'] in active_names
@@ -189,7 +201,7 @@ def topic_selector(all_topics: list[dict], active_names: set[str], pre_selected:
     old_settings = termios.tcgetattr(fd)
     try:
         tty.setcbreak(fd)
-        console.print("[dim]↑↓ move   [SPACE] toggle   [ENTER] confirm   [Ctrl+C] cancel[/dim]\n")
+        console.print("[dim]↑↓ move   [SPACE] toggle   [ENTER] confirm   type to filter   [Ctrl+C] cancel[/dim]\n")
         with Live(build(), console=console, screen=False, refresh_per_second=4) as live:
             def _refresh():
                 while not stop_refresh.is_set():
@@ -202,18 +214,29 @@ def topic_selector(all_topics: list[dict], active_names: set[str], pre_selected:
                     ch = sys.stdin.read(1)
                 except KeyboardInterrupt:
                     return None
+                filtered = get_filtered()
                 if ch in ('\r', '\n'):
                     return [n for n in names if n in selected]
                 elif ch == ' ':
-                    name = names[cursor]
-                    selected.discard(name) if name in selected else selected.add(name)
+                    if filtered and 0 <= cursor < len(filtered):
+                        name = filtered[cursor]['name']
+                        selected.discard(name) if name in selected else selected.add(name)
                 elif ch == '\x1b':
                     if sys.stdin.read(1) == '[':
                         arrow = sys.stdin.read(1)
                         if arrow == 'A':
                             cursor = max(0, cursor - 1)
                         elif arrow == 'B':
-                            cursor = min(len(names) - 1, cursor + 1)
+                            cursor = min(len(filtered) - 1, cursor + 1)
+                elif ch in ('\x7f', '\x08'):  # backspace
+                    filter_str = filter_str[:-1]
+                    cursor = min(cursor, max(0, len(get_filtered()) - 1))
+                elif ch == '\x15':  # Ctrl+U — clear filter
+                    filter_str = ""
+                    cursor = 0
+                elif ch.isprintable() and ch != ' ':
+                    filter_str += ch
+                    cursor = 0
                 live.update(build())
     finally:
         stop_refresh.set()
