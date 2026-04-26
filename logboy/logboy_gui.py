@@ -592,6 +592,8 @@ class RecordingsPage:
             ui.image('/assets/logboy_logo.png').classes('w-7 h-7')
             ui.label('logboy').classes('text-lg font-bold')
             ui.label('· Recordings').classes('text-lg text-gray-400')
+            ui.label(os.path.expanduser(self.config.get('storage_path', '—'))) \
+                .classes('text-xs font-mono text-gray-400 ml-2')
             ui.element('div').classes('flex-1')
             self.count_label = ui.label().classes('text-xs text-gray-400')
             ui.button(icon='refresh', on_click=self._load).props('flat round dense').tooltip('Refresh')
@@ -613,6 +615,7 @@ class RecordingsPage:
             {'name': 'size',     'label': 'Size',     'field': 'size',     'align': 'right', 'sortable': False},
             {'name': 'topics',   'label': 'Topics',   'field': 'topics',   'align': 'right', 'sortable': True},
             {'name': 'messages', 'label': 'Messages', 'field': 'messages', 'align': 'right', 'sortable': True},
+            {'name': 'actions',  'label': '',         'field': 'actions',  'align': 'right', 'sortable': False},
         ]
         self.table = ui.table(columns=columns, rows=[], row_key='name').classes('w-full')
 
@@ -623,6 +626,14 @@ class RecordingsPage:
                 {{ props.value }}
             </q-td>
         ''')
+        self.table.add_slot('body-cell-actions', '''
+            <q-td :props="props">
+                <q-btn flat round dense icon="delete" color="red"
+                       :disable="props.row.is_active"
+                       @click="$parent.$emit('delete', props.row)" />
+            </q-td>
+        ''')
+        self.table.on('delete', lambda e: self._confirm_delete(e.args))
 
         self._load()
 
@@ -652,11 +663,28 @@ class RecordingsPage:
                 'topics':    len(r.topics),
                 'messages':  total_msgs,
                 'is_active': is_active,
+                'path':      r.path,
             })
 
         self.table.rows = rows
         self.table.update()
         self.count_label.set_text(f'{len(recs)} recording(s)')
+
+    def _confirm_delete(self, row: dict):
+        path = row['path']
+        name = row['name']
+        with ui.dialog() as dialog, ui.card():
+            ui.label(f'Delete "{name}"?').classes('text-base font-semibold')
+            ui.label('This permanently removes the recording directory.') \
+                .classes('text-sm text-gray-400 mt-1')
+            with ui.row().classes('justify-end gap-2 mt-4'):
+                ui.button('Cancel', on_click=dialog.close).props('flat')
+                ui.button('Delete', on_click=lambda: (
+                    shutil.rmtree(path),
+                    dialog.close(),
+                    self._load(),
+                )).props('color=red')
+        dialog.open()
 
 
 # ── Main ─────────────────────────────────────────────────────────────────────
