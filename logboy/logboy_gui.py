@@ -427,7 +427,7 @@ class LogboyGUI:
 
         active_names = discover()
 
-        with ui.dialog().props('persistent').classes('w-full max-w-4xl') as dialog, ui.card().classes('w-full'):
+        with ui.dialog().props('persistent') as dialog, ui.card().classes('q-pa-sm').style('width: 1400px; max-width: 90vw'):
             with ui.row().classes('items-center w-full mb-1'):
                 ui.label('Select Topics').classes('text-base font-semibold')
                 ui.element('div').classes('flex-1')
@@ -440,9 +440,10 @@ class LogboyGUI:
 
             with ui.row().classes('w-full text-xs text-gray-400 px-2 gap-2'):
                 ui.element('div').classes('w-6')
-                ui.label('Topic').classes('flex-1 font-mono')
-                ui.label('Exp FPS').classes('w-24 text-right')
-                ui.label('Live FPS').classes('w-20 text-right')
+                ui.label('Topic').classes('flex-1 min-w-[8rem] font-mono')
+                ui.label('Type').classes('w-72 min-w-0 font-mono')
+                ui.label('Exp FPS').classes('w-20 text-right shrink-0')
+                ui.label('Live FPS').classes('w-20 text-right shrink-0')
 
             ui.separator()
 
@@ -464,11 +465,12 @@ class LogboyGUI:
                     with ui.row().classes('items-center w-full px-2 gap-2').style('min-height:0; height:1.4rem') as row:
                         cb = ui.checkbox(value=checked).props('dense')
                         checkboxes[name] = cb
-                        ui.label(name).classes(f'flex-1 text-sm font-mono {muted}')
+                        ui.label(name).classes(f'flex-1 min-w-[8rem] truncate text-sm font-mono {muted}')
+                        ui.label(t.get('type', '')).classes('w-72 min-w-0 truncate text-xs font-mono text-gray-400')
                         inp = ui.number(value=fps_val, min=0, step=0.1, placeholder='—') \
-                            .props('dense borderless hide-bottom-space').classes('w-24 text-right text-xs')
+                            .props('dense borderless hide-bottom-space').classes('w-20 text-right text-xs shrink-0')
                         fps_inputs[name] = inp
-                        fps_labels[name] = ui.label('—').classes('w-20 text-right text-xs')
+                        fps_labels[name] = ui.label('—').classes('w-20 text-right text-xs shrink-0')
                     rows[name] = row
 
             search.on('update:model-value', lambda e: [
