@@ -70,10 +70,11 @@ def _git_version(start_path: str) -> str:
 
 
 class LogboyGUI:
-    def __init__(self, controller: LogboyController, config: dict):
-        self.controller = controller
-        self.config = config
-        self.is_paused = False
+    def __init__(self, controller: LogboyController, config: dict, config_path: str):
+        self.controller  = controller
+        self.config      = config
+        self.config_path = config_path
+        self.is_paused   = False
 
         self._blink_state = False
         self._ui_recording = False
@@ -180,6 +181,12 @@ class LogboyGUI:
                 self.free_label = ui.label('—').classes('text-sm font-mono text-center')
         # Topic monitor table
         ui.separator().classes('my-2')
+        with ui.row().classes('items-center px-4 pb-1 gap-2'):
+            ui.label('Topics').classes('text-sm font-semibold')
+            self.topics_count_label = ui.label('').classes('text-xs text-gray-400')
+            ui.element('div').classes('flex-1')
+            self.topics_btn = ui.button(icon='tune', on_click=self._open_topics_dialog) \
+                .props('flat round dense').tooltip('Select topics')
         columns = [
             {'name': 'name',         'label': 'Topic',    'field': 'name',         'align': 'left',  'sortable': True},
             {'name': 'expected_fps', 'label': 'Exp. FPS', 'field': 'expected_fps', 'align': 'right', 'sortable': True},
@@ -295,6 +302,7 @@ class LogboyGUI:
         self._set_enabled(self.pause_btn, True)
         self._set_enabled(self.max_input, False); self._set_enabled(self.delay_input, False); self._set_enabled(self.split_select, False); self._set_enabled(self.split_time_input, False); self._set_enabled(self.split_size_input, False)
         self.rec_indicator.classes('text-red-500', remove='text-transparent')
+        self._set_enabled(self.topics_btn, False)
         self.blink_timer.activate()
         self.elapsed_timer.activate()
 
@@ -313,6 +321,7 @@ class LogboyGUI:
         self._set_enabled(self.max_input, True); self._set_enabled(self.delay_input, True); self._set_enabled(self.split_select, True); self._set_enabled(self.split_time_input, True); self._set_enabled(self.split_size_input, True)
         self.rec_indicator.props('name=fiber_manual_record')
         self.rec_indicator.classes('text-transparent', remove='text-red-500 text-orange-500')
+        self._set_enabled(self.topics_btn, True)
 
     def toggle_pause(self):
         if not self.is_paused:
@@ -338,9 +347,12 @@ class LogboyGUI:
     # ── Monitor ──────────────────────────────────────────────────────────────
 
     def _refresh_table(self):
-        snapshots: list[TopicSnapshot] = self.controller.get_stats()
+        configured = {t['name'] for t in (self.config.get('topics') or [])}
+        snapshots: list[TopicSnapshot] = [s for s in self.controller.get_stats() if s.name in configured]
         self.table.rows = [self._snapshot_to_row(s) for s in sorted(snapshots, key=lambda s: s.name)]
         self.table.update()
+        n = len(self.config.get('topics') or [])
+        self.topics_count_label.set_text(f'{n} configured')
         self.controller.check_max_duration()
         self._sync_state()
         self._refresh_rec_info()
@@ -393,6 +405,129 @@ class LogboyGUI:
         self._ui_recording = is_recording
         self._ui_paused    = is_paused
         self.is_paused     = is_paused
+
+    # ── Topic selection ──────────────────────────────────────────────────────
+
+    def _open_topics_dialog(self):
+        config_topics  = {t['name']: t for t in (self.config.get('topics') or [])}
+        all_topics_map = {}
+        checkboxes     = {}
+        fps_inputs     = {}
+        fps_labels     = {}
+        saved_state    = {}  # preserves user edits across refreshes
+
+        def discover():
+            active_topics = self.controller.node.discover_topics()
+            active_names  = {t['name'] for t in active_topics}
+            new_map = {t['name']: t for t in active_topics}
+            new_map.update(config_topics)
+            all_topics_map.clear()
+            all_topics_map.update(new_map)
+            return active_names
+
+        active_names = discover()
+
+        with ui.dialog().props('persistent') as dialog, ui.card().classes('q-pa-sm').style('width: 1400px; max-width: 90vw'):
+            with ui.row().classes('items-center w-full mb-1'):
+                ui.label('Select Topics').classes('text-base font-semibold')
+                ui.element('div').classes('flex-1')
+                ui.button('All',  on_click=lambda: [cb.set_value(True)  for cb in checkboxes.values()]).props('flat dense size=sm')
+                ui.button('None', on_click=lambda: [cb.set_value(False) for cb in checkboxes.values()]).props('flat dense size=sm')
+                ui.button(icon='refresh', on_click=lambda: refresh_list()).props('flat round dense').tooltip('Re-discover topics')
+
+            search = ui.input(placeholder='Filter topics…') \
+                .props('dense clearable outlined').classes('w-full mb-1')
+
+            with ui.row().classes('w-full text-xs text-gray-400 px-2 gap-2'):
+                ui.element('div').classes('w-6')
+                ui.label('Topic').classes('flex-1 min-w-[8rem] font-mono')
+                ui.label('Type').classes('w-72 min-w-0 font-mono')
+                ui.label('Exp FPS').classes('w-20 text-right shrink-0')
+                ui.label('Live FPS').classes('w-20 text-right shrink-0')
+
+            ui.separator()
+
+            rows = {}  # name → row element
+
+            @ui.refreshable
+            def topic_list():
+                all_topics = sorted(all_topics_map.values(), key=lambda t: t['name'])
+                checkboxes.clear()
+                fps_inputs.clear()
+                fps_labels.clear()
+                rows.clear()
+                for t in all_topics:
+                    name    = t['name']
+                    prev    = saved_state.get(name, {})
+                    checked = prev.get('checked', name in config_topics)
+                    fps_val = prev.get('fps', t['fps'] if t.get('fps') not in (None, 0, 0.0) else None)
+                    muted   = 'text-gray-400' if name not in active_names else ''
+                    with ui.row().classes('items-center w-full px-2 gap-2').style('min-height:0; height:1.4rem') as row:
+                        cb = ui.checkbox(value=checked).props('dense')
+                        checkboxes[name] = cb
+                        ui.label(name).classes(f'flex-1 min-w-[8rem] truncate text-sm font-mono {muted}')
+                        ui.label(t.get('type', '')).classes('w-72 min-w-0 truncate text-xs font-mono text-gray-400')
+                        inp = ui.number(value=fps_val, min=0, step=0.1, placeholder='—') \
+                            .props('dense borderless hide-bottom-space').classes('w-20 text-right text-xs shrink-0')
+                        fps_inputs[name] = inp
+                        fps_labels[name] = ui.label('—').classes('w-20 text-right text-xs shrink-0')
+                    rows[name] = row
+
+            search.on('update:model-value', lambda e: [
+                rows[name].set_visibility((e.args or '').lower() in name.lower())
+                for name in rows
+            ])
+
+            with ui.scroll_area().classes('h-[32rem] w-full'):
+                topic_list()
+
+            def refresh_list():
+                for name in list(checkboxes):
+                    saved_state[name] = {'checked': checkboxes[name].value, 'fps': fps_inputs[name].value}
+                nonlocal active_names
+                active_names = discover()
+                topic_list.refresh()
+
+            def refresh_fps():
+                stats = {s.name: s for s in self.controller.get_stats()}
+                for name, lbl in fps_labels.items():
+                    s = stats.get(name)
+                    if s and s.first_seen:
+                        lbl.set_text(f'{s.fps:.1f}')
+                        if fps_inputs[name].value is None:
+                            fps_inputs[name].set_value(round(s.fps, 1))
+                    else:
+                        lbl.set_text('—')
+
+            fps_timer = ui.timer(0.5, refresh_fps)
+
+            with ui.row().classes('justify-end gap-2 mt-3 w-full'):
+                ui.button('Cancel', on_click=lambda: (fps_timer.cancel(), dialog.close())).props('flat')
+                ui.button('Save',   on_click=lambda: self._save_topics(
+                    dialog, fps_timer, checkboxes, fps_inputs, all_topics_map,
+                )).props('color=primary')
+
+        dialog.open()
+
+    def _save_topics(self, dialog, fps_timer, checkboxes, fps_inputs, all_topics_map):
+        fps_timer.cancel()
+
+        new_topics = []
+        for name, cb in checkboxes.items():
+            if not cb.value:
+                continue
+            t = dict(all_topics_map[name])
+            fps_val = fps_inputs[name].value
+            t['fps'] = float(fps_val) if fps_val else 0
+            new_topics.append(t)
+
+        self.config['topics'] = new_topics
+        with open(self.config_path, 'w') as f:
+            yaml.dump(self.config, f, default_flow_style=False, sort_keys=False)
+        self.controller.configure_recorder(self.config)
+
+        dialog.close()
+        ui.notify(f'{len(new_topics)} topic(s) saved.', type='positive', position='top')
 
     def _refresh_elapsed(self):
         elapsed = self.controller.get_elapsed()
@@ -756,7 +891,7 @@ def main():
         })();
         </script>
         ''')
-        LogboyGUI(controller, config)
+        LogboyGUI(controller, config, args.config)
         with ui.element('div').classes('fixed bottom-0 left-0 right-0 flex items-center justify-center gap-2 py-1'):
             ui.link('logboy', 'https://github.com/yannikmotzet/logboy', new_tab=True) \
                 .classes('text-xs text-gray-600 hover:text-gray-400 no-underline')

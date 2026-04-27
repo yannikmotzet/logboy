@@ -12,6 +12,7 @@ from rich.live import Live
 from rich.table import Table
 from rich.text import Text
 from rich.console import Console
+from rich.markup import escape
 from rich import box
 from logboy.logboy_controller import LogboyController, list_recordings
 from logboy.logboy_stats import TopicSnapshot
@@ -87,7 +88,7 @@ def build_table(snapshots: list[TopicSnapshot], is_paused: bool, elapsed: float,
         f"[dim]   {hint}[/dim]"
     )
 
-    table = Table(title=title, box=box.SIMPLE, show_footer=True, title_justify="left")
+    table = Table(title=title, box=box.SIMPLE, show_footer=True, title_justify="left", width=console.width)
     table.add_column("TOPIC", style="cyan", footer=f"[dim]{len(snapshots)} topic(s)[/dim]")
     table.add_column("EXP FPS", justify="right", style="dim")
     table.add_column("FPS", justify="right")
@@ -154,6 +155,94 @@ def read_keypresses(pause_callback, stop_event):
         termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
 
 
+# ── Topic Selector ────────────────────────────────────────────────────────────
+
+def topic_selector(all_topics: list[dict], active_names: set[str], pre_selected: set[str], get_stats=None) -> list[str] | None:
+    names      = [t['name'] for t in all_topics]
+    selected   = set(pre_selected)
+    cursor     = 0
+    filter_str = ""
+
+    def get_filtered() -> list[dict]:
+        if not filter_str:
+            return all_topics
+        f = filter_str.lower()
+        return [t for t in all_topics if f in t['name'].lower()]
+
+    def build():
+        filtered = get_filtered()
+        stats = {s.name: s for s in get_stats()} if get_stats else {}
+        if filter_str:
+            title = f"Filter: [bold]{escape(filter_str)}[/bold]_  [dim]({len(filtered)}/{len(all_topics)})[/dim]"
+        else:
+            title = f"[dim]type to filter   {len(all_topics)} topics[/dim]"
+        table = Table(title=title, title_justify="left", box=box.SIMPLE, show_header=True, padding=(0, 1), width=console.width)
+        table.add_column("", width=4)
+        table.add_column("TOPIC")
+        table.add_column("EXP FPS", justify="right", style="dim", width=10)
+        table.add_column("LIVE FPS", justify="right", width=10)
+        table.add_column("AGE", justify="right", style="dim", width=8)
+        for i, t in enumerate(filtered):
+            s          = stats.get(t['name'])
+            check      = "[green]\\[x][/green]" if t['name'] in selected else "\\[ ]"
+            is_active  = t['name'] in active_names
+            name_style = "bold" if i == cursor else ("dim" if not is_active else "")
+            prefix     = "[bold cyan]>[/bold cyan]" if i == cursor else " "
+            name       = escape(t['name'])
+            label      = name if is_active else f"{name} [dim](inactive)[/dim]"
+            cfg_fps    = Text(f"{t['fps']:.1f}", style="dim") if t.get('fps') not in (None, 0, 0.0) else Text("—", style="dim")
+            fps_live   = Text(f"{s.fps:.1f}", style=fps_style(s)) if s and s.first_seen else Text("—", style="dim")
+            age_str    = Text(f"{s.age:.1f}s", style="dim")        if s and s.first_seen else Text("—", style="dim")
+            table.add_row(f"{prefix} {check}", f"[{name_style}]{label}[/{name_style}]" if name_style else label, cfg_fps, fps_live, age_str)
+        return table
+
+    stop_refresh = threading.Event()
+    fd = sys.stdin.fileno()
+    old_settings = termios.tcgetattr(fd)
+    try:
+        tty.setcbreak(fd)
+        console.print("[dim]↑↓ move   [SPACE] toggle   [ENTER] confirm   type to filter   [Ctrl+C] cancel[/dim]\n")
+        with Live(build(), console=console, screen=False, refresh_per_second=4) as live:
+            def _refresh():
+                while not stop_refresh.is_set():
+                    live.update(build())
+                    time.sleep(0.5)
+            threading.Thread(target=_refresh, daemon=True).start()
+
+            while True:
+                try:
+                    ch = sys.stdin.read(1)
+                except KeyboardInterrupt:
+                    return None
+                filtered = get_filtered()
+                if ch in ('\r', '\n'):
+                    return [n for n in names if n in selected]
+                elif ch == ' ':
+                    if filtered and 0 <= cursor < len(filtered):
+                        name = filtered[cursor]['name']
+                        selected.discard(name) if name in selected else selected.add(name)
+                elif ch == '\x1b':
+                    if sys.stdin.read(1) == '[':
+                        arrow = sys.stdin.read(1)
+                        if arrow == 'A':
+                            cursor = max(0, cursor - 1)
+                        elif arrow == 'B':
+                            cursor = min(len(filtered) - 1, cursor + 1)
+                elif ch in ('\x7f', '\x08'):  # backspace
+                    filter_str = filter_str[:-1]
+                    cursor = min(cursor, max(0, len(get_filtered()) - 1))
+                elif ch == '\x15':  # Ctrl+U — clear filter
+                    filter_str = ""
+                    cursor = 0
+                elif ch.isprintable() and ch != ' ':
+                    filter_str += ch
+                    cursor = 0
+                live.update(build())
+    finally:
+        stop_refresh.set()
+        termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
+
+
 # ── Config ────────────────────────────────────────────────────────────────────
 
 def load_config(config_file: str) -> dict:
@@ -169,6 +258,57 @@ def validate_config(config: dict):
 
 
 # ── Commands ──────────────────────────────────────────────────────────────────
+
+@app.command()
+def topics(
+    config: Path = typer.Option(..., "-c", "--config", help="Path to config YAML", exists=True, file_okay=True, dir_okay=False),
+):
+    """Interactively select topics to record and update the config."""
+    cfg = load_config(str(config))
+
+    devnull_fd = os.open(os.devnull, os.O_WRONLY)
+    saved_stderr_fd = os.dup(2)
+    os.dup2(devnull_fd, 2)
+    os.close(devnull_fd)
+    try:
+        controller = LogboyController()
+        controller.configure_monitor()
+        active_topics = controller.node.discover_topics()
+
+        active_names  = {t['name'] for t in active_topics}
+        config_topics = {t['name']: t for t in (cfg.get('topics') or [])}
+
+        all_topics_map = {t['name']: t for t in active_topics}
+        all_topics_map.update(config_topics)
+        all_topics = [t for _, t in sorted(all_topics_map.items())]
+
+        selected_names = topic_selector(all_topics, active_names, set(config_topics.keys()), controller.get_stats)
+    finally:
+        controller.shutdown()
+        os.dup2(saved_stderr_fd, 2)
+        os.close(saved_stderr_fd)
+
+    if selected_names is None:
+        raise typer.Exit(0)
+
+    final_stats = {s.name: s for s in controller.get_stats()}
+    new_topics = []
+    for n in selected_names:
+        if n in config_topics:
+            new_topics.append(config_topics[n])
+        else:
+            t = dict(all_topics_map[n])
+            s = final_stats.get(n)
+            if s and s.fps > 0:
+                t['fps'] = round(s.fps, 1)
+            new_topics.append(t)
+    cfg['topics'] = new_topics
+
+    with open(config, 'w') as f:
+        yaml.dump(cfg, f, default_flow_style=False, sort_keys=False)
+
+    console.print(f"[green]✓[/green] {config} updated — {len(new_topics)} topic(s) selected.")
+
 
 @app.command()
 def record(
